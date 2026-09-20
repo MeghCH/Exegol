@@ -1,12 +1,18 @@
 # Write-up : "Fun With Functional #2" (Privilege Escalation vers root)
 
 **Cible :** 10.10.0.43
+
 **Difficulté :** Easy
+
+**Date :** 16/09/2026
+
 **Objectif :** root.txt
+
 **Techniques utilisées :** Upload de fichier malveillant, exécution de code arbitraire (RCE), énumération post-exploitation, vol de clé SSH, escalade de privilèges via sudo
+
 **Outils utilisés :** curl, ssh
 
-> Ce challenge est la suite directe de "Fun With Functional" (premier round). Le point d'entrée (upload Haskell → exécution de code en tant que `www-data`) est identique. Ce write-up se concentre sur l'étape supplémentaire : passer de `www-data` à `root`.
+> Ce challenge est la suite directe de "Fun With Functional". Le point d'entrée (upload Haskell -> exécution de code en tant que `www-data`) est identique. Ce write-up se concentre sur l'étape supplémentaire : passer de `www-data` à `root`.
 
 ---
 
@@ -55,7 +61,7 @@ curl -s http://10.10.0.43:5001/uploads/exploit.hs
 
 **Découvertes clés :**
 
-1. La liste des processus (`ps aux`) montre que le serveur Flask lui-même est lancé par root via `sudo -u www-data python3 /var/www/html/app.py` — comportement normal de démarrage, pas exploitable directement.
+1. La liste des processus (`ps aux`) montre que le serveur Flask lui-même est lancé par root via `sudo -u www-data python3 /var/www/html/app.py` - comportement normal de démarrage, pas exploitable directement.
 2. Le dossier `/home/prof/.ssh` contient une clé privée SSH (`id_rsa`) lisible par tout le monde (permissions `rw-r--r--` au lieu de `rw-------` attendu). C'est une mauvaise configuration classique : une clé privée SSH ne devrait jamais être lisible par un autre utilisateur que son propriétaire.
 
 ---
@@ -84,7 +90,7 @@ Le contenu complet de la clé privée RSA s'affiche dans la réponse.
 
 ### Utilisation de la clé pour se connecter en SSH
 
-On sauvegarde la clé récupérée dans un fichier local, en lui donnant les permissions strictes que SSH exige (`chmod 600` — sinon SSH refuse de l'utiliser, la considérant comme non sécurisée) :
+On sauvegarde la clé récupérée dans un fichier local, en lui donnant les permissions strictes que SSH exige (`chmod 600` - sinon SSH refuse de l'utiliser, la considérant comme non sécurisée) :
 
 ```bash
 cat > prof_key << 'EOF'
@@ -116,7 +122,7 @@ User prof may run the following commands on lambda:
     (root) NOPASSWD: /usr/local/bin/flask run
 ```
 
-**Explication :** cette règle sudo autorise `prof` à exécuter la commande exacte `/usr/local/bin/flask run` en tant que root, sans avoir besoin de mot de passe (`NOPASSWD`). `flask` est l'outil en ligne de commande du framework web Flask ; sa sous-commande `run` démarre un serveur web à partir d'une application Python. Le problème : Flask a besoin de savoir quel fichier Python charger comme application, et cette information peut être fournie de plusieurs façons — dont une que la règle sudo ne bloque pas.
+**Explication :** cette règle sudo autorise `prof` à exécuter la commande exacte `/usr/local/bin/flask run` en tant que root, sans avoir besoin de mot de passe (`NOPASSWD`). `flask` est l'outil en ligne de commande du framework web Flask ; sa sous-commande `run` démarre un serveur web à partir d'une application Python. Le problème : Flask a besoin de savoir quel fichier Python charger comme application, et cette information peut être fournie de plusieurs façons, dont une que la règle sudo ne bloque pas.
 
 **Faille exploitée :** Détournement de binaire autorisé via sudo (Sudo Privilege Escalation / GTFOBins-style). La règle sudo n'autorise que la commande `flask run` sans arguments supplémentaires (ajouter `--app monfichier.py` change la ligne de commande et sudo la refuse). Mais Flask a une convention par défaut : s'il ne reçoit aucune indication explicite, il cherche automatiquement un fichier nommé `app.py` dans le dossier courant. Cette convention permet de contourner la restriction : on place notre propre fichier malveillant nommé exactement `app.py` dans le dossier où l'on exécute la commande, et Flask (donc root) le charge et l'exécute sans qu'on ait eu besoin de modifier la ligne de commande autorisée par sudo.
 
@@ -213,3 +219,15 @@ Lecture de /root/root.txt (flag final)
 - **Pivot :** vol d'une clé SSH privée mal protégée → accès `prof`.
 - **Escalade de privilèges :** détournement de la règle sudo `NOPASSWD: flask run` via la convention de chargement `app.py` de Flask → exécution de code en root.
 - **Flag root :** obtenu dans `/root/root.txt`.
+
+---
+
+## Evidences
+
+### Flag user.txt
+
+![Flag user.txt](Evidences/Reconnaissance%20du%20systeme.png)
+
+### Flag
+
+![Flag](Evidences/Flag%20fun%20with%20fonctional%202.png)

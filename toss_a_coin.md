@@ -1,10 +1,15 @@
 # Write-up : "Toss a Coin"
 
 **Cible :** 10.10.0.15
+
 **Objectif :** Récupérer user.txt
-**Difficulté :** Easy (696 pts)
-**Date :** 18 septembre 2026
+
+**Difficulté :** Easy
+
+**Date :** 18/09/2026
+
 **Techniques utilisées :** Reconnaissance réseau, stéganographie (piste écartée), fuzzing récursif de répertoires, analyse du code source HTML
+
 **Outils utilisés :** nmap, curl, exiftool, strings, binwalk, steghide, stegseek, gobuster, ssh
 
 ---
@@ -31,6 +36,8 @@ Le titre de la page web (`http-title`) est "Toss a coin to your witcher", réfé
 ```bash
 curl -s http://10.10.0.15/
 ```
+
+Pour voir les headers de réponse (souvent des indices y sont cachés).
 
 La page contient :
 
@@ -74,7 +81,7 @@ stegseek jaskier.jpg /usr/share/wordlists/rockyou.txt
 
 - Wordlist personnalisée basée sur les thèmes de la chanson (mots-clés, pas de paroles complètes reproduites).
 
-**Résultat :** aucune passphrase valide trouvée. Cette piste a été abandonnée — l'image ne contenait pas de données stéganographiques exploitables (ou pas avec cette méthode).
+**Résultat :** aucune passphrase valide trouvée. Cette piste a été abandonnée -> l'image ne contenait pas de données stéganographiques exploitables (ou pas avec cette méthode).
 
 **Leçon :** ne pas s'acharner sur une piste si les outils dédiés (stegseek avec rockyou) ne donnent rien rapidement ; il faut explorer les autres surfaces d'attaque en parallèle.
 
@@ -105,13 +112,11 @@ curl -s http://10.10.0.15/t/
 
 **Message affiché :** _"Do you know the lyrics? this one is pretty famous!"_
 
-→ Confirmation : le chemin serveur encode la chanson lettre par lettre.
+-> Confirmation : le chemin serveur encode la chanson lettre par lettre.
 
 ### 3.3 Principe de la vulnérabilité
 
 Le serveur expose une arborescence de répertoires où chaque caractère de la phrase-clé (le refrain de la chanson) devient un sous-dossier d'une seule lettre, et les espaces entre les mots sont encodés par des underscores (`_`) servant de séparateurs. Il fallait fuzzer niveau par niveau pour reconstituer le chemin complet, caractère par caractère.
-
-C'est une variante originale de path disclosure / hidden directory enumeration, où l'indice thématique ("sing it", "know the lyrics") sert de guide pour orienter le fuzzing plutôt que d'utiliser une wordlist générique à chaque étape.
 
 ### 3.4 Méthodologie de découverte
 
@@ -127,6 +132,8 @@ gobuster dir -u http://10.10.0.15/<chemin_actuel>/ \
   -x php,txt,html,zip,bak -t 50
 ```
 
+`-t 50` = c'est juste le nombre de threads (requêtes en parallèle) que gobuster va utiliser. Si l'on met rien, gubuster utilise 10 par défaut.
+
 Chaque exécution de gobuster révélait un nouveau sous-dossier (statut 301) correspondant à la lettre suivante, jusqu'à révéler progressivement le chemin :
 
 ```
@@ -134,8 +141,6 @@ Chaque exécution de gobuster révélait un nouveau sous-dossier (statut 301) co
 ```
 
 Ce chemin épelle, lettre par lettre et mot par mot (séparés par `_`), la phrase-clé du refrain de la chanson (sans caractère apostrophe, remplacé ici par "oh").
-
-**Point d'attention méthodologique :** à une étape, une hypothèse incorrecte a été testée en sautant directement à la suite supposée du refrain (`.../witcher_/valley_of_plenty/`), ce qui a produit un 404. Il a fallu revenir en arrière et refuzzer précisément le niveau précédent sans présumer de la suite — la vraie continuation était `oh` (contraction phonétique) avant `_valley_of_plenty`.
 
 ### 3.5 La page finale
 
@@ -177,7 +182,7 @@ cat ~/user.txt
 **Résultat obtenu :**
 
 ```
-EPI{TODO_remplacer_par_le_flag_reellement_obtenu}
+EPI{R3Sp3C7_D03sNT_M4k3_h1S70rY}
 ```
 
 ---
@@ -205,16 +210,19 @@ EPI{TODO_remplacer_par_le_flag_reellement_obtenu}
 
 ---
 
-## Points clés / Leçons apprises
+## Conclusion
 
-1. **Ne pas négliger les indices narratifs :** les messages affichés sur la page ("sing it", "know the lyrics") orientaient directement vers la solution.
-2. **Fuzzing progressif et intelligent :** plutôt qu'une seule passe de fuzzing, il a fallu itérer niveau par niveau, en utilisant la taille de réponse (Content-Length) comme indicateur de contenu différent (226 octets = page générique, 371 octets = page finale).
-3. **Toujours vérifier le code source HTML brut :** les identifiants étaient visibles uniquement dans le HTML source, masqués côté rendu visuel via CSS — un exemple classique de "sécurité par l'obscurité" côté client, totalement inefficace côté serveur.
-4. **Savoir abandonner une fausse piste à temps :** le temps passé sur la stéganographie (steghide/stegseek) n'a rien donné ; il valait mieux pivoter plus tôt vers le fuzzing web.
+- **Accès initial :** énumération OSINT/narrative (indices de la page) -> fuzzing récursif de répertoires épelant les paroles d'une chanson -> découverte de credentials cachés en HTML.
+- **Flag user :** obtenu dans `~/user.txt` après connexion SSH avec l'utilisateur `jaskier`.
 
 ---
 
-## Conclusion
+## Evidences
 
-- **Accès initial :** énumération OSINT/narrative (indices de la page) → fuzzing récursif de répertoires épelant les paroles d'une chanson → découverte de credentials cachés en HTML.
-- **Flag user :** obtenu dans `~/user.txt` après connexion SSH avec l'utilisateur `jaskier`.
+### File / Toss A Coin
+
+![File / Toss A Coin](Evidences/File%20Toss%20a%20coin.png)
+
+### Fichier hidden
+
+![Fichier hidden](Evidences/Flag%20Toss%20a%20coin.png)

