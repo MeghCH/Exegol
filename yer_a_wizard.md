@@ -122,7 +122,8 @@ cat .reallyHidden
 
 ## 4. Authentification SSH par mot de passe faible
 
-**Faille exploitée :** Credentials faibles / exposés (CWE-798 : Use of Hard-coded Credentials) -> fuite d'identifiants via un service mal sécurisé, puis réutilisation sur un autre service.
+**Faille exploitée :** Credentials faibles / exposés (CWE-521 (Weak Password) / CWE-522 (Insufficiently Protected Credentials)
+-> fuite d'identifiants via un service mal sécurisé, puis réutilisation sur un autre service.
 
 ```bash
 ssh hagrid@10.10.0.5

