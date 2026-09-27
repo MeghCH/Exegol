@@ -4,7 +4,7 @@
 
 **Objective:** Privilege escalation to root.txt
 
-**Difficulty:** Medium
+**Difficulty:** Easy
 
 **Date:** 15/09/2026
 

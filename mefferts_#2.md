@@ -4,7 +4,7 @@
 
 **Objective:** Get root.txt
 
-**Difficulty:** Easy
+**Difficulty:** Medium
 
 **Date:** 15/09/2026
 
