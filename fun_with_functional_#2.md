@@ -103,7 +103,7 @@ chmod 600 prof_key
 ssh -i prof_key prof@10.10.0.43
 ```
 
-**Result:** successful interactive SSH connection as the `prof` user.
+**Result:** successful interactive SSH connection as the `prof` user with private key.
 
 ---
 
@@ -128,37 +128,47 @@ User prof may run the following commands on lambda:
 
 ### Creating the malicious Python file
 
-**Explanation of the code:** when Python imports/loads a file, all the code written at the top level (not inside a function) runs immediately, even before Flask starts its web server. We use this moment to:
+**Explanation of the code:** when Python loads a module, all the code written at the top level (outside any function) runs immediately, as soon as the file is imported — before Flask even starts its web server. We use this moment to:
 
-- read the file `/root/root.txt` (normally inaccessible to `prof`) and copy its content to `/tmp/root_flag.txt`, a location we can then read back as `prof`.
+- read the file `/root/root.txt` (normally inaccessible to `prof`) and copy its content to `/tmp/root_flag.txt`, a location we can then read back as `prof`;
 - make this output file readable by everyone (`chmod 644`), since it was just created by root and would otherwise be inaccessible to `prof`.
-- the rest of the file (the Flask part) is only there so the file stays minimally valid and doesn't crash the `flask run` command.
+
+The two lines `from flask import Flask` and `app = Flask(__name__)` are **required**, not cosmetic: `flask run` imports the module and then looks for a Flask application object named `app`. Without it, Flask aborts with `Error: Failed to find Flask application or factory in module 'app'` and never fully starts. The application object is enough — no route needs to be defined, since our payload has already run during the import.
 
 ```bash
-cat > /tmp/evil.py << 'EOF'
+cat > /home/prof/app.py << 'EOF'
 import os
-os.system("cat /root/root.txt > /tmp/root_flag.txt")
-os.system("chmod 644 /tmp/root_flag.txt")
+os.system("cat /root/root.txt > /tmp/root_flag.txt; chmod 644 /tmp/root_flag.txt")
 
 from flask import Flask
 app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "pwned"
 EOF
 ```
 
+**Detailed breakdown of the payload line:**
+
+```python
+os.system("cat /root/root.txt > /tmp/root_flag.txt; chmod 644 /tmp/root_flag.txt")
+```
+
+- `os.system(...)` runs the string it receives as a shell command, exactly as if it had been typed in a terminal — but here it inherits the privileges of the process running it. Since `flask run` was launched with `sudo`, this process runs as **root**, so the whole command executes with root rights.
+- `cat /root/root.txt` reads the flag file. `/root` is the root user's home directory: `prof` normally has no access to it, but root does, which is exactly why we needed to run our code from inside the root process.
+- `> /tmp/root_flag.txt` redirects that output into a new file in `/tmp`. `/tmp` is world-writable, so it's a convenient drop location that `prof` can reach afterwards. The file is created **owned by root** (since root is writing it).
+- `;` chains the two commands: the second one runs right after the first, regardless of its result.
+- `chmod 644 /tmp/root_flag.txt` fixes the permissions of the file we just created. Without this, the file would be owned by root with default permissions and `prof` might not be able to read it back. `644` grants read+write to the owner (root) and **read** to everyone else — including `prof`, who can now `cat` it.
+
+In short: this single line uses the temporary root privilege to copy a root-only file into a spot the unprivileged `prof` user can read, then loosens its permissions so `prof` can actually retrieve it.
+
 ### Placing the file and executing
 
-As soon as the command runs, Flask automatically loads `app.py` from the current folder (`/home/prof`), executing our malicious code with full root rights, even before the web server actually starts.
+We run the command from `/home/prof`, where our `app.py` now sits. Flask automatically loads `app.py` from the current folder, executing our top-level code with full root rights during the import, before the web server actually starts serving:
 
 ```bash
-cp /tmp/evil.py /home/prof/app.py
 cd /home/prof
-sudo /usr/local/bin/flask run &
-sleep 3
+sudo /usr/local/bin/flask run
 ```
+
+Once the server prints its startup line (`Running on http://127.0.0.1:5000`), our payload has already run. We stop it with `Ctrl-C`.
 
 ### Retrieving the flag
 
@@ -169,18 +179,18 @@ cat /tmp/root_flag.txt
 The content of `/root/root.txt` is displayed: this is the final flag we were looking for.
 
 ```
-EPI{TODO_replace_with_the_actually_obtained_flag}
+EPI{}
 ```
 
 ---
 
 ## Summary of exploited vulnerabilities
 
-| #   | Vulnerability                                    | Type / Category                              | Short explanation                                                                                                                                                            |
-| --- | -------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Upload and execution of arbitrary Haskell code     | Unrestricted Upload / RCE (CWE-434)          | Initial entry point, obtaining a shell as `www-data`                                                                                                                        |
-| 2   | Private SSH key readable by everyone               | Incorrect Default Permissions (CWE-276)      | Allows stealing the `prof` user's identity without knowing their password                                                                                                   |
-| 3   | Overly permissive sudo rule on `flask run`         | Sudo Misconfiguration / Privilege Escalation | Flask's default loading convention (`app.py` in the current folder) allows executing arbitrary code as root without modifying the command line allowed by sudo             |
+| #   | Vulnerability                                  | Type / Category                              | Short explanation                                                                                                                                              |
+| --- | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Upload and execution of arbitrary Haskell code | Unrestricted Upload / RCE (CWE-434)          | Initial entry point, obtaining a shell as `www-data`                                                                                                           |
+| 2   | Private SSH key readable by everyone           | Incorrect Default Permissions (CWE-276)      | Allows stealing the `prof` user's identity without knowing their password                                                                                      |
+| 3   | Overly permissive sudo rule on `flask run`     | Sudo Misconfiguration / Privilege Escalation | Flask's default loading convention (`app.py` in the current folder) allows executing arbitrary code as root without modifying the command line allowed by sudo |
 
 ---
 
@@ -215,9 +225,9 @@ Reading /root/root.txt (final flag)
 
 ## Conclusion
 
-- **Initial access:** RCE via upload of a non-sandboxed Haskell file → shell as `www-data`.
-- **Pivot:** theft of a poorly protected private SSH key → access as `prof`.
-- **Privilege escalation:** hijacking the sudo rule `NOPASSWD: flask run` via Flask's `app.py` loading convention → code execution as root.
+- **Initial access:** RCE via upload of a non-sandboxed Haskell file -> shell as `www-data`.
+- **Pivot:** theft of a poorly protected private SSH key -> access as `prof`.
+- **Privilege escalation:** hijacking the sudo rule `NOPASSWD: flask run` via Flask's `app.py` loading convention -> code execution as root.
 - **Root flag:** obtained in `/root/root.txt`.
 
 ---
