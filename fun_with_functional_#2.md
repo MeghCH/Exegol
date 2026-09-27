@@ -179,7 +179,7 @@ cat /tmp/root_flag.txt
 The content of `/root/root.txt` is displayed: this is the final flag we were looking for.
 
 ```
-EPI{}
+EPI{7VRns_0U7_p17H0N_1S_n0_83773r}
 ```
 
 ---
