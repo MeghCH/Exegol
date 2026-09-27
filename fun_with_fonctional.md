@@ -1,62 +1,62 @@
 # Write-up : "Fun With Functional"
 
-**Cible :** 10.10.0.10
+**Target:** 10.10.0.10
 
-**Difficulté :** Easy
+**Difficulty:** Easy
 
-**Date :** 15/09/2026
+**Date:** 15/09/2026
 
-**Techniques utilisées :** Reconnaissance réseau, énumération web, upload de fichier malveillant, exécution de code arbitraire (RCE), énumération post-exploitation, escalade de privilèges
+**Techniques used:** Network reconnaissance, web enumeration, malicious file upload, arbitrary code execution (RCE), post-exploitation enumeration, privilege escalation
 
-**Outils utilisés :** nmap, curl
+**Tools used:** nmap, curl
 
 ---
 
-## 1. Reconnaissance réseau (Nmap)
+## 1. Network reconnaissance (Nmap)
 
-**Commande :**
+**Command:**
 
 ```bash
 nmap -sC -sV -p- -T4 10.10.0.10
 ```
 
-**Ce que fait cette commande :** `nmap` est un scanner de ports. Il envoie des paquets réseau à la machine cible pour découvrir quels services (ports) sont ouverts et accessibles.
+**What this command does:** `nmap` is a port scanner. It sends network packets to the target machine to discover which services (ports) are open and accessible.
 
-- `-sC` : lance des scripts de détection automatique (bannières, vulnérabilités connues, versions de service).
-- `-sV` : essaie de déterminer précisément la version de chaque service détecté.
-- `-p-` : scanne l'intégralité des 65535 ports possibles (pas seulement les plus courants).
-- `-T4` : règle la vitesse du scan sur "agressif" pour aller plus vite.
+- `-sC`: runs automatic detection scripts (banners, known vulnerabilities, service versions).
+- `-sV`: tries to precisely determine the version of each detected service.
+- `-p-`: scans all 65535 possible ports (not just the most common ones).
+- `-T4`: sets the scan speed to "aggressive" to go faster.
 
-**Résultat :**
+**Result:**
 
-- `22/tcp` : SSH (OpenSSH 10.0p2) — service d'accès distant sécurisé, ici juste identifié, pas exploité directement dans un premier temps.
-- `5001/tcp` : Un serveur web tournant sous Flask (framework Python) via Werkzeug. La page d'accueil, intitulée "FUN with functionnal!", se moque de la sécurité et vante les mérites du langage Haskell, avec un lien vers une page `/homework`.
+- `22/tcp`: SSH (OpenSSH 10.0p2), secure remote access service, here just identified, not directly exploited at first.
+- `5001/tcp`: A web server running Flask (Python framework) via Werkzeug. The home page, titled "FUN with functionnal!", mocks security and extols the merits of the Haskell language, with a link to a `/homework` page.
 
 ---
 
-## 2. Découverte du formulaire d'upload
+## 2. Discovering the upload form
 
-**Commande :**
+**Command:**
 
 ```bash
 curl -s http://10.10.0.10:5001/homework
 ```
 
-**Ce que fait cette commande :** `curl` envoie une requête HTTP GET à cette URL et affiche la réponse du serveur (le code HTML de la page), exactement comme le ferait un navigateur, mais en ligne de commande.
+**What this command does:** `curl` sends an HTTP GET request to this URL and displays the server's response (the page's HTML code), exactly as a browser would, but from the command line.
 
-**Résultat :** La page affiche un formulaire d'upload de fichier. Le texte explique qu'il faut envoyer un programme Haskell (extension `.hs`) qui affiche le message "I love Haskell", et que ce fichier sera automatiquement compilé et corrigé par un "outil d'autocorrection" côté serveur.
+**Result:** The page displays a file upload form. The text explains that a Haskell program (`.hs` extension) must be sent that prints the message "I love Haskell", and that this file will be automatically compiled and graded by a server-side "auto-grading tool".
 
-**Pourquoi c'est intéressant :** dès qu'un serveur web accepte de compiler et d'exécuter un fichier envoyé par un utilisateur externe, cela ouvre la porte à une exécution de code arbitraire -> le contenu du programme n'est jamais vérifié ni limité par le serveur.
+**Why it's interesting:** as soon as a web server agrees to compile and execute a file sent by an external user, this opens the door to arbitrary code execution -> the program's content is never checked or restricted by the server.
 
 ---
 
-## 3. Exploitation : Exécution de code arbitraire (RCE) via upload Haskell
+## 3. Exploitation: Arbitrary code execution (RCE) via Haskell upload
 
-**Faille exploitée :** Upload et exécution de code non sandboxé (CWE-434 : Unrestricted Upload of File with Dangerous Type).
+**Vulnerability exploited:** Upload and execution of non-sandboxed code (CWE-434: Unrestricted Upload of File with Dangerous Type).
 
-**Explication de la faille :** Le serveur récupère le fichier `.hs` envoyé, le compile avec GHC (le compilateur Haskell) puis exécute le binaire obtenu, sans jamais vérifier ce que fait réellement ce programme. Le langage Haskell dispose d'un module appelé `System.Process` qui permet d'exécuter n'importe quelle commande du système d'exploitation (comme le ferait un script bash). En écrivant nous-mêmes le programme Haskell, on peut donc lui faire exécuter les commandes de notre choix sur le serveur, à la place du serveur lui-même.
+**Explanation of the vulnerability:** The server retrieves the uploaded `.hs` file, compiles it with GHC (the Haskell compiler) then executes the resulting binary, without ever checking what this program actually does. The Haskell language has a module called `System.Process` that allows executing any operating system command (just as a bash script would). By writing the Haskell program ourselves, we can therefore make it execute the commands of our choice on the server, in place of the server itself.
 
-### Création du payload (fichier Haskell piégé)
+### Creating the payload (trapped Haskell file)
 
 ```bash
 cat > exploit.hs << 'EOF'
@@ -69,37 +69,37 @@ main = do
 EOF
 ```
 
-**Ce que fait cette commande :** `cat > exploit.hs << 'EOF' ... EOF` est une manière d'écrire plusieurs lignes de texte directement dans un nouveau fichier nommé `exploit.hs`, sans avoir besoin d'ouvrir un éditeur de texte. Tout ce qui se trouve entre les deux `EOF` devient le contenu du fichier.
+**What this command does:** `cat > exploit.hs << 'EOF' ... EOF` is a way of writing several lines of text directly into a new file named `exploit.hs`, without needing to open a text editor. Everything between the two `EOF` markers becomes the file's content.
 
-**Explication du code Haskell contenu dans le fichier :**
+**Explanation of the Haskell code contained in the file:**
 
-- `import System.Process` : charge le module Haskell qui permet de lancer des commandes système.
-- `putStrLn "I love Haskell"` : affiche le texte demandé par le challenge (pour respecter la consigne affichée sur le site).
-- `output <- readProcess "id" [] ""` : exécute la commande système `id` (qui affiche l'identité de l'utilisateur courant : uid, gid, groupes) et récupère sa sortie dans la variable `output`.
-- `putStrLn output` : affiche cette sortie récupérée.
+- `import System.Process`: loads the Haskell module that allows launching system commands.
+- `putStrLn "I love Haskell"`: prints the text required by the challenge (to comply with the instructions shown on the site).
+- `output <- readProcess "id" [] ""`: executes the system command `id` (which displays the current user's identity: uid, gid, groups) and captures its output in the `output` variable.
+- `putStrLn output`: prints this captured output.
 
-### Upload du fichier vers le serveur
+### Uploading the file to the server
 
 ```bash
 curl -s -X POST http://10.10.0.10:5001/homework -F "file=@exploit.hs"
 ```
 
-**Ce que fait cette commande :** envoie une requête HTTP POST (méthode utilisée pour soumettre des formulaires) contenant le fichier `exploit.hs` en pièce jointe, exactement comme si on cliquait sur "Parcourir" puis "Upload" dans un vrai formulaire web.
+**What this command does:** sends an HTTP POST request (method used to submit forms) containing the `exploit.hs` file as an attachment, exactly as if clicking "Browse" then "Upload" in a real web form.
 
-- `-X POST` : précise la méthode HTTP à utiliser.
-- `-F "file=@exploit.hs"` : indique à curl d'envoyer le fichier local `exploit.hs` comme donnée de formulaire, sous le nom de champ `file` (celui attendu par le formulaire HTML du site).
+- `-X POST`: specifies the HTTP method to use.
+- `-F "file=@exploit.hs"`: tells curl to send the local file `exploit.hs` as form data, under the field name `file` (the one expected by the site's HTML form).
 
-Le serveur répond par une redirection vers `/uploads/exploit.hs`, signe que l'upload a été accepté.
+The server responds with a redirect to `/uploads/exploit.hs`, a sign that the upload was accepted.
 
-### Récupération du résultat de la compilation/exécution
+### Retrieving the compilation/execution result
 
 ```bash
 curl -s http://10.10.0.10:5001/uploads/exploit.hs
 ```
 
-**Ce que fait cette commande :** récupère la page où le serveur affiche le résultat de la compilation et de l'exécution du fichier qu'on vient d'envoyer.
+**What this command does:** retrieves the page where the server displays the result of compiling and executing the file we just sent.
 
-**Résultat obtenu :**
+**Result obtained:**
 
 ```
 [1 of 2] Compiling Main ...
@@ -108,13 +108,13 @@ I love Haskell
 uid=33(www-data) gid=33(www-data) groups=33(www-data)
 ```
 
-Le serveur a bien compilé notre programme, l'a exécuté, et on récupère la sortie de la commande `id` : le serveur tourne avec l'utilisateur système `www-data` (l'utilisateur habituel des serveurs web Apache/Nginx). **L'exécution de commande arbitraire est confirmée.**
+The server did compile our program, executed it, and we retrieve the output of the `id` command: the server runs as the system user `www-data` (the usual user for Apache/Nginx web servers). **Arbitrary command execution is confirmed.**
 
 ---
 
-## 4. Localisation du flag user.txt
+## 4. Locating the user.txt flag
 
-Maintenant qu'on peut exécuter n'importe quelle commande, on cherche l'emplacement du fichier `user.txt` sur le système de fichiers.
+Now that we can execute any command, we look for the location of the `user.txt` file on the filesystem.
 
 ```bash
 cat > exploit.hs << 'EOF'
@@ -131,22 +131,22 @@ curl -s -X POST http://10.10.0.10:5001/homework -F "file=@exploit.hs"
 curl -s http://10.10.0.10:5001/uploads/exploit.hs
 ```
 
-**Explication du changement dans le code :** au lieu d'exécuter directement la commande `id`, lance sh, qui lui-même lance bash, qui lui-même lance find, on demande maintenant d'exécuter `bash -c "..."`, ce qui permet de lancer n'importe quelle commande shell complète, avec ses propres options.
+**Explanation of the code change:** instead of directly executing the `id` command, which launches sh, which itself launches bash, which itself launches find, we now ask to execute `bash -c "..."`, which allows launching any complete shell command, with its own options.
 
-- `find / -name user.txt` : cherche, à partir de la racine du système (`/`), tout fichier nommé exactement `user.txt`.
-- `2>&1` : redirige les messages d'erreur (comme "permission refusée" sur les dossiers protégés) vers la même sortie que le résultat normal, pour tout voir d'un coup plutôt que de les perdre.
+- `find / -name user.txt`: searches, starting from the system root (`/`), for any file named exactly `user.txt`.
+- `2>&1`: redirects error messages (such as "permission denied" on protected folders) to the same output as the normal result, to see everything at once rather than losing them.
 
-**Résultat :** parmi une longue liste de messages "Permission denied" (normal, `www-data` n'a pas accès à tous les dossiers du système), on trouve la ligne recherchée :
+**Result:** among a long list of "Permission denied" messages (normal, `www-data` doesn't have access to all the system's folders), we find the line we're looking for:
 
 ```
 /home/prof/user.txt
 ```
 
-Le fichier appartient donc à un utilisateur nommé `prof`.
+The file therefore belongs to a user named `prof`.
 
 ---
 
-## 5. Lecture du flag user
+## 5. Reading the user flag
 
 ```bash
 cat > exploit.hs << 'EOF'
@@ -162,9 +162,9 @@ curl -s -X POST http://10.10.0.10:5001/homework -F "file=@exploit.hs"
 curl -s http://10.10.0.10:5001/uploads/exploit.hs
 ```
 
-**Explication :** ici, on exécute directement la commande `cat` (affichage du contenu d'un fichier) avec comme argument le chemin exact trouvé à l'étape précédente.
+**Explanation:** here, we directly execute the `cat` command (displaying a file's content) with the exact path found in the previous step as an argument.
 
-**Résultat obtenu :**
+**Result obtained:**
 
 ```
 EPI{h4sK377_C4n_83_r3vsh3ll_4s_W3lL}
@@ -172,18 +172,18 @@ EPI{h4sK377_C4n_83_r3vsh3ll_4s_W3lL}
 
 ---
 
-## Résumé de faille exploitée
+## Summary of exploited vulnerability
 
-| #   | Faille                                                         | Type / Catégorie                    | Explication courte                                                                                                                                                              |
-| --- | -------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Upload et exécution de code Haskell arbitraire sans sandboxing | Unrestricted Upload / RCE (CWE-434) | Le serveur compile et exécute aveuglément tout fichier `.hs` envoyé, permettant d'exécuter n'importe quelle commande système via le module `System.Process` du langage Haskell. |
+| #   | Vulnerability                                                   | Type / Category                     | Short explanation                                                                                                                                                              |
+| --- | ---------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Upload and execution of arbitrary Haskell code without sandboxing | Unrestricted Upload / RCE (CWE-434) | The server blindly compiles and executes any uploaded `.hs` file, allowing execution of any system command via the Haskell language's `System.Process` module. |
 
 ---
 
 ## Conclusion
 
-- **Accès initial :** RCE via upload de fichier Haskell non sandboxé → shell en tant que `www-data`.
-- **Flag user :** obtenu dans `/home/prof/user.txt`.
+- **Initial access:** RCE via upload of a non-sandboxed Haskell file → shell as `www-data`.
+- **User flag:** obtained in `/home/prof/user.txt`.
 
 ---
 

