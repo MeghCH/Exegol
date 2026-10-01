@@ -52,13 +52,20 @@ curl -i http://$ip/l3_B4n4N13r_D3s_M0nT4gN3s.php
 
 ---
 
-## 4. Download the hidden image directly
+## 4. List the folder, then download the image
 
-> Listing the folder 301-redirects to a broken ServerName (10.10.0.10). So we grab the file directly:
+List the hidden folder (keep the trailing slash) — the autoindex reveals its content:
+
+```bash
+curl -s "http://$ip/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/"
+```
+You get an "Index of /..." page with the file `Hot_Babe.png`. Download it:
 
 ```bash
 wget "http://$ip/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/Hot_Babe.png"
 ```
+
+> Note: on some deploys the listing 301-redirects to a dead ServerName (10.10.0.10). If so, skip the listing and `wget` the file directly (its name is `Hot_Babe.png`).
 
 **Vulnerability:** directory listing enabled (CWE-548).
 
